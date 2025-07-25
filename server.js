@@ -51,8 +51,15 @@ const upload = multer(); // Configura multer una vez
 
 // Habilita CORS para todas las rutas
 // <-- VERIFICA ESTO: FRONTEND_URL desde tu .env o secrets
+coonst allowedOrigins = ["https://jostyn07.github.io"]
 app.use(cors({
-    origin: process.env.FRONTEND_URL 
+    origin: function (origin, callback) {
+        if (!origin || allowedOrgins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error("No autorizado por CORS"));
+        }
+    }                                       
 }));
 
 app.use(express.json()); // Middleware para parsear JSON
