@@ -51,7 +51,7 @@ const upload = multer(); // Configura multer una vez
 
 // Habilita CORS para todas las rutas
 // <-- VERIFICA ESTO: FRONTEND_URL desde tu .env o secrets
-coonst allowedOrigins = ["https://jostyn07.github.io"]
+coonst allowedOrigins = ["https://jostyn07.github.io"];
 app.use(cors({
     origin: function (origin, callback) {
         if (!origin || allowedOrgins.includes(origin)) {
