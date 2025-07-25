@@ -66,7 +66,7 @@ app.use(express.json()); // Middleware para parsear JSON
 
 
 // --- RUTA DE SUBIDA DE ARCHIVOS (Aquí solo va la lógica de la ruta) ---
-app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
+app.post('/api/upload-to-drive', async (req, res) => {
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ error: 'No se subieron los archivos' });
     }
