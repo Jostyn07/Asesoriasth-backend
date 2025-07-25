@@ -52,21 +52,24 @@ const upload = multer(); // Configura multer una vez
 // Habilita CORS para todas las rutas
 // <-- VERIFICA ESTO: FRONTEND_URL desde tu .env o secrets
 const allowedOrigins = ["https://jostyn07.github.io"];
-app.use(cors({
+
+const corsOptions = {
     origin: function (origin, callback) {
-        if (!origin || allowedOrgins.includes(origin)) {
+        if (!origin || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             callback(new Error("No autorizado por CORS"));
         }
-    }                                       
-}));
-
+    },
+    credentials: true,
+};
+app.use(cors(corsOptions));
+    
 app.use(express.json()); // Middleware para parsear JSON
 
 
 // --- RUTA DE SUBIDA DE ARCHIVOS (Aquí solo va la lógica de la ruta) ---
-app.post('/api/upload-to-drive', async (req, res) => {
+app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
     if (!req.files || req.files.length === 0) {
         return res.status(400).json({ error: 'No se subieron los archivos' });
     }
