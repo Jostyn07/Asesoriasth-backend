@@ -1,4 +1,4 @@
-// server.js (actualización para devolver links de archivos)
+// server.js (actualizado para generar links visibles)
 require('dotenv').config();
 const fs = require('fs');
 const { Readable } = require('stream'); 
@@ -9,7 +9,7 @@ const cors = require('cors');
 
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 const DRIVE_SHARED_ID = process.env.GOOGLE_DRIVE_SHARED_ID;
-const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 let auth;
 try {
@@ -21,7 +21,7 @@ try {
         keyFile: keyPath,
         scopes: SCOPES,
     });
-    console.log('Autenticación de Google Drive configurada con archivo secreto en /etc/secrets.');
+    console.log('Autenticación de Google Drive configurada con archivo secreto.');
 } catch (error) {
     console.error('Error al configurar la autenticación de Google Drive:', error);
     process.exit(1);
@@ -70,12 +70,27 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
             const driveResponse = await drive.files.create({
                 resource: fileMetadata,
                 media,
-                fields: 'id, webViewLink, name',
+                fields: 'id, name',
                 supportsAllDrives: true
             });
+
+            const fileId = driveResponse.data.id;
+
+            // Hacer el archivo visible para cualquier persona con el enlace
+            await drive.permissions.create({
+                fileId: fileId,
+                requestBody: {
+                    role: 'reader',
+                    type: 'anyone',
+                },
+                supportsAllDrives: true
+            });
+
+            const webViewLink = `https://drive.google.com/file/d/${fileId}/view`;
+
             uploadedFileLinks.push({
                 name: driveResponse.data.name,
-                url: driveResponse.data.webViewLink
+                url: webViewLink
             });
         }
 
