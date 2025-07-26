@@ -18,11 +18,18 @@ let auth; // Declara 'auth' aquí para que sea accesible globalmente.
 try {
     // Intenta leer el contenido JSON directamente de la variable de entorno para despliegue
     // <-- VERIFICA ESTO: Este 'if' es para cuando uses Render, que pasa el JSON directamente.
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) { 
+    const fs = require('fs')
+    const keyFilePath = 'etc/secrets/service-account.json';
+
+    if (fs.existsSync(keyFilePath)) {
         auth = new google.auth.GoogleAuth({
-            credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY), // Parsea el JSON
+            keyFile: keyFilePath,
             scopes: SCOPES,
         });
+        console.log('Autenticación configurada desde archivo secreto.')
+    } else {
+        throw new Error('No se encontró el archivo de clave del servicio.');
+    }
         // <-- VERIFICA ESTO: "console"
         console.log('Autenticación de Google Drive configurada con credenciales de variable de entorno.'); 
     } 
