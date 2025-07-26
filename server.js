@@ -33,7 +33,6 @@ try {
             keyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH, // Debe apuntar a ./Documentos.json
             scopes: SCOPES,
         });
-    }
         // <-- VERIFICA ESTO: "console"
         console.log('Autenticación de Google Drive configurada con archivo de credenciales local.'); 
     } else {
