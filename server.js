@@ -1,28 +1,27 @@
-// server.js
+// server.js (actualización para devolver links de archivos)
 require('dotenv').config();
 const fs = require('fs');
-const { Readable } = require('stream');
+const { Readable } = require('stream'); 
 const express = require('express');
 const { google } = require('googleapis');
 const multer = require('multer');
-const cors = require('cors');
+const cors = require('cors'); 
 
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
+const DRIVE_SHARED_ID = process.env.GOOGLE_DRIVE_SHARED_ID;
 const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
 let auth;
-
 try {
-    const keyFilePath = '/etc/secrets/service-account.json';
-    if (fs.existsSync(keyFilePath)) {
-        auth = new google.auth.GoogleAuth({
-            keyFile: keyFilePath,
-            scopes: SCOPES,
-        });
-        console.log('Autenticación configurada desde archivo secreto.');
-    } else {
+    const keyPath = '/etc/secrets/service-account.json';
+    if (!fs.existsSync(keyPath)) {
         throw new Error('No se encontró el archivo de clave del servicio.');
     }
+    auth = new google.auth.GoogleAuth({
+        keyFile: keyPath,
+        scopes: SCOPES,
+    });
+    console.log('Autenticación de Google Drive configurada con archivo secreto en /etc/secrets.');
 } catch (error) {
     console.error('Error al configurar la autenticación de Google Drive:', error);
     process.exit(1);
@@ -54,7 +53,6 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
         const drive = google.drive({ version: 'v3', auth });
         const clientName = req.body.nombreCliente || '';
         const clientLastName = req.body.apellidoCliente || '';
-
         const uploadedFileLinks = [];
 
         for (const file of req.files) {
@@ -62,25 +60,29 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
             const fileMetadata = {
                 name: fileName,
                 parents: [DRIVE_FOLDER_ID],
+                driveId: DRIVE_SHARED_ID,
+                supportsAllDrives: true
             };
             const media = {
                 mimeType: file.mimetype,
-                body: Readable.from(file.buffer),
+                body: Readable.from(file.buffer)
             };
             const driveResponse = await drive.files.create({
                 resource: fileMetadata,
-                media: media,
+                media,
                 fields: 'id, webViewLink, name',
-                supportsAllDrives: true,
+                supportsAllDrives: true
             });
-
             uploadedFileLinks.push({
                 name: driveResponse.data.name,
-                url: driveResponse.data.webViewLink,
+                url: driveResponse.data.webViewLink
             });
         }
 
-        res.status(200).json({ message: 'Archivos subidos correctamente', files: uploadedFileLinks });
+        res.status(200).json({
+            message: 'Archivos subidos correctamente',
+            files: uploadedFileLinks
+        });
     } catch (error) {
         console.error('Error al subir archivos a Google Drive:', error);
         res.status(500).json({ error: 'Error al subir archivos a Google Drive' });
@@ -90,4 +92,5 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    console.log(`CORS habilitado para: ${allowedOrigins.join(', ')}`);
 });
