@@ -13,7 +13,7 @@ let auth;
 try {
     if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
         auth = new google.auth.GoogleAuth({
-            keyFile: '/etc/secrets/service-account.json',
+            credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
             scopes: ['https://www.googleapis.com/auth/drive']
         });
         console.log('Autenticación de Google Drive configurada con variable de entorno.');
