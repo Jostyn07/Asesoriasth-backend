@@ -1,6 +1,5 @@
-// server.js (actualizado para generar links visibles)
+// server.js
 require('dotenv').config();
-const fs = require('fs');
 const { Readable } = require('stream'); 
 const express = require('express');
 const { google } = require('googleapis');
@@ -8,20 +7,19 @@ const multer = require('multer');
 const cors = require('cors'); 
 
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-const DRIVE_SHARED_ID = process.env.GOOGLE_DRIVE_SHARED_ID;
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
+const SCOPES = ['https://www.googleapis.com/auth/drive.file'];
 
 let auth;
 try {
-    const keyPath = '/etc/secrets/service-account.json';
-    if (!fs.existsSync(keyPath)) {
-        throw new Error('No se encontró el archivo de clave del servicio.');
+    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+        auth = new google.auth.GoogleAuth({
+            credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+            scopes: ['https://www.googleapis.com/auth/drive']
+        });
+        console.log('Autenticación de Google Drive configurada con variable de entorno.');
+    } else {
+        throw new Error('No se encontró GOOGLE_SERVICE_ACCOUNT_KEY.');
     }
-    auth = new google.auth.GoogleAuth({
-        keyFile: keyPath,
-        scopes: SCOPES,
-    });
-    console.log('Autenticación de Google Drive configurada con archivo secreto.');
 } catch (error) {
     console.error('Error al configurar la autenticación de Google Drive:', error);
     process.exit(1);
@@ -30,7 +28,7 @@ try {
 const app = express();
 const upload = multer();
 
-const allowedOrigins = ["https://jostyn07.github.io"];
+const allowedOrigins = ["https://asesoriasth.com"];
 const corsOptions = {
     origin: function (origin, callback) {
         if (!origin || allowedOrigins.includes(origin)) {
@@ -60,7 +58,6 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
             const fileMetadata = {
                 name: fileName,
                 parents: [DRIVE_FOLDER_ID],
-                driveId: DRIVE_SHARED_ID,
                 supportsAllDrives: true
             };
             const media = {
@@ -76,12 +73,11 @@ app.post('/api/upload-to-drive', upload.array('files'), async (req, res) => {
 
             const fileId = driveResponse.data.id;
 
-            // Hacer el archivo visible para cualquier persona con el enlace
             await drive.permissions.create({
                 fileId: fileId,
                 requestBody: {
                     role: 'reader',
-                    type: 'anyone',
+                    type: 'anyone'
                 },
                 supportsAllDrives: true
             });
