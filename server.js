@@ -51,8 +51,8 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
     return sheet.properties.sheetId;
 }
 
-// Función para actualizar el color de las filas
-async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
+// Función para actualizar el color de las celdas
+async function repeatCell(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
     const requests = [{
         updateCells: {
             range: {
@@ -260,5 +260,6 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
 
 
