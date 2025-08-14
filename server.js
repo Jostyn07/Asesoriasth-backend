@@ -17,10 +17,22 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 let auth;
 try {
-    auth = new google.auth.GoogleAuth({
-        scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-    });
-    console.log('Autenticación de Google configurada.');
+    const secretFilePath = process.env.NODE_ENV === 'production' 
+        ? '/etc/secrets/Documentos_json' 
+        : path.join(__dirname, 'Documentos.json');
+
+    if (fs.existsSync(secretFilePath)) {
+        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
+        const credentials = JSON.parse(credentialsContent);
+        
+        auth = new google.auth.GoogleAuth({
+            credentials: credentials,
+            scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+        });
+        console.log('Autenticación de Google configurada.');
+    } else {
+        throw new Error('No se encontró el archivo de credenciales.');
+    }
 } catch (error) {
     console.error('Error al configurar la autenticación de Google:', error);
     process.exit(1);
@@ -53,14 +65,34 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 }
 
 // Función para actualizar el color de las filas
-        const titularColor = { red: 0.0, green: 1.0, blue: 0.0 }; // Verde puro
-        const dependienteColor = { red: 1.0, green: 1.0, blue: 0.0 }; // Amarillo puro
-
-        await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex, 1, titularColor);
-
-        if (dependentsRows.length > 0) {
-            await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
+async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
+    const requests = [{
+        updateCells: {
+            range: {
+                sheetId: await getSheetId(sheets, spreadsheetId, sheetName),
+                startRowIndex: startRowIndex,
+                endRowIndex: startRowIndex + numRows,
+                startColumnIndex: 0,
+                endColumnIndex: 25 // Asume que tienes 25 columnas (A-Y)
+            },
+            rows: Array(numRows).fill({
+                values: [{
+                    userEnteredFormat: {
+                        backgroundColor: color
+                    }
+                }]
+            }),
+            fields: 'userEnteredFormat.backgroundColor'
         }
+    }];
+
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests
+        }
+    });
+}
 
 // Endpoint unificado para recibir todo el formulario
 app.post('/api/submit-form', upload.array('files'), async (req, res) => {
