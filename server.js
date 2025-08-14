@@ -17,22 +17,10 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 let auth;
 try {
-    const secretFilePath = process.env.NODE_ENV === 'production' 
-        ? '/etc/secrets/Documentos_json' 
-        : path.join(__dirname, 'Documentos.json');
-
-    if (fs.existsSync(secretFilePath)) {
-        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
-        const credentials = JSON.parse(credentialsContent);
-        
-        auth = new google.auth.GoogleAuth({
-            credentials: credentials,
-            scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-        });
-        console.log('Autenticación de Google configurada.');
-    } else {
-        throw new Error('No se encontró el archivo de credenciales.');
-    }
+    auth = new google.auth.GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+    });
+    console.log('Autenticación de Google configurada.');
 } catch (error) {
     console.error('Error al configurar la autenticación de Google:', error);
     process.exit(1);
@@ -97,10 +85,6 @@ async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRow
 // Endpoint unificado para recibir todo el formulario
 app.post('/api/submit-form', upload.array('files'), async (req, res) => {
     try {
-        if (!req.body || !req.body.formData) {
-            return res.status(400).json({ error: 'Datos del formulario faltantes o en formato incorrecto.' });
-        }
-        
         const data = JSON.parse(req.body.formData);
         const { nombre, apellidos, poBox, direccion, casaApartamento, condado, ciudad, codigoPostal,
             cignaPlans, dependents, metodoPago, pagoBanco, pagoTarjeta, ...obamacareData } = data;
