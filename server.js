@@ -53,34 +53,14 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 }
 
 // Función para actualizar el color de las filas
-async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
-    const requests = [{
-        updateCells: {
-            range: {
-                sheetId: await getSheetId(sheets, spreadsheetId, sheetName),
-                startRowIndex: startRowIndex,
-                endRowIndex: startRowIndex + numRows,
-                startColumnIndex: 0,
-                endColumnIndex: 25 
-            },
-            rows: Array(numRows).fill({
-                values: [{
-                    userEnteredFormat: {
-                        backgroundColor: color
-                    }
-                }]
-            }),
-            fields: 'userEnteredFormat.backgroundColor'
-        }
-    }];
+        const titularColor = { red: 0.0, green: 1.0, blue: 0.0 }; // Verde puro
+        const dependienteColor = { red: 1.0, green: 1.0, blue: 0.0 }; // Amarillo puro
 
-    await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-            requests
+        await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex, 1, titularColor);
+
+        if (dependentsRows.length > 0) {
+            await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
         }
-    });
-}
 
 // Endpoint unificado para recibir todo el formulario
 app.post('/api/submit-form', upload.array('files'), async (req, res) => {
