@@ -15,27 +15,14 @@ const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
-let auth;
-try {
-    const secretFilePath = process.env.NODE_ENV === 'production' 
-        ? '/etc/secrets/Documentos_json' 
-        : path.join(__dirname, 'Documentos.json');
-
-    if (fs.existsSync(secretFilePath)) {
-        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
-        const credentials = JSON.parse(credentialsContent);
-        
-        auth = new google.auth.GoogleAuth({
-            credentials: credentials,
-            scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-        });
-        console.log('Autenticación de Google configurada.');
-    } else {
-        throw new Error('No se encontró el archivo de credenciales.');
-    }
+let auth;try {
+auth = new google.auth.GoogleAuth({
+scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+});
+console.log('Autenticación de Google configurada.');
 } catch (error) {
-    console.error('Error al configurar la autenticación de Google:', error);
-    process.exit(1);
+console.error('Error al configurar la autenticación de Google:', error);
+process.exit(1);
 }
 
 const app = express();
@@ -273,3 +260,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
