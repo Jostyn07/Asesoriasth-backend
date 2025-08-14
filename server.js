@@ -5,7 +5,8 @@ const express = require('express');
 const { google } = require('googleapis');
 const multer = require('multer');
 const cors = require('cors'); 
-const { parse } = require('url');
+const fs = require('fs');
+const path = require('path');
 
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
 const SHEET_NAME_OBAMACARE = "Pólizas";
@@ -15,14 +16,21 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 let auth;
 try {
-    if (process.env.GOOGLE_SERVICE_ACCOUNT_KEY) {
+    const secretFilePath = process.env.NODE_ENV === 'production' 
+        ? '/etc/secrets/Documentos_json' 
+        : path.join(__dirname, 'Documentos.json');
+
+    if (fs.existsSync(secretFilePath)) {
+        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
+        const credentials = JSON.parse(credentialsContent);
+        
         auth = new google.auth.GoogleAuth({
-            credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY),
+            credentials: credentials,
             scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
         });
-        console.log('Autenticación de Google Drive y Sheets configurada con variable de entorno.');
+        console.log('Autenticación de Google Drive y Sheets configurada con archivo secreto.');
     } else {
-        throw new Error('No se encontró GOOGLE_SERVICE_ACCOUNT_KEY.');
+        throw new Error('No se encontró el archivo de credenciales.');
     }
 } catch (error) {
     console.error('Error al configurar la autenticación de Google:', error);
@@ -45,17 +53,14 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Endpoint unificado para recibir todo el formulario
 app.post('/api/submit-form', upload.array('files'), async (req, res) => {
     try {
-        // 1. Recoger datos del formulario y generar ID de cliente
         const data = JSON.parse(req.body.formData);
         const { nombre, apellidos, poBox, direccion, casaApartamento, condado, ciudad, codigoPostal,
             cignaPlans, dependents, metodoPago, pagoBanco, pagoTarjeta, ...obamacareData } = data;
 
         const clientId = `CLI-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}`;
 
-        // 2. Subir archivos a Google Drive
         const uploadedFileLinks = [];
         if (req.files && req.files.length > 0) {
             const drive = google.drive({ version: 'v3', auth });
@@ -78,7 +83,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             }
         }
         
-        // Formatear dirección consolidada
         let fullAddress = '';
         if (poBox) {
             fullAddress = poBox;
@@ -87,10 +91,8 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             fullAddress = addressParts.join(', ');
         }
 
-        // 3. Escribir datos en Google Sheets
         const sheets = google.sheets({ version: 'v4', auth });
 
-        // a) Datos de Obamacare (Pólizas)
         const titularRow = [
             obamacareData.operador || '',
             new Date().toLocaleDateString('es-ES'),
@@ -119,7 +121,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             uploadedFileLinks.join('\n')
         ];
         
-        // Construir filas para los dependientes
         const dependentsRows = dependents.map(dep => [
             obamacareData.operador || '', 
             new Date().toLocaleDateString('es-ES'),
@@ -128,24 +129,24 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             dep.parentesco || '',
             dep.nombre || '',
             dep.apellido || '',
-            '', // Sexo no está en dependientes
-            '', // Correo no está en dependientes
-            '', // Teléfono no está en dependientes
+            '',
+            '',
+            '',
             dep.fechaNacimiento ? isoToUs(dep.fechaNacimiento) : '',
-            '', // Estado migratorio no está en dependientes
+            '',
             dep.ssn || '',
-            '', // Ingresos no está en dependientes
-            '', // Aplica no está en dependientes
-            '', // Cantidad dependientes no está en dependientes
-            '', // Dirección no está en dependientes
-            '', // Compañía no está en dependientes
-            '', // Plan no está en dependientes
-            '', // Crédito fiscal no está en dependientes
-            '', // Prima no está en dependientes
-            '', // Link no está en dependientes
-            '', // Observaciones no está en dependientes
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
+            '',
             clientId,
-            '' // Documentos no está en dependientes
+            ''
         ]);
 
         await sheets.spreadsheets.values.append({
@@ -155,7 +156,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             resource: { values: [titularRow, ...dependentsRows] }
         });
 
-        // b) Datos de Cigna Complementario
         if (cignaPlans && cignaPlans.length > 0) {
             const cignaRows = cignaPlans.map(plan => [
                 clientId,
@@ -178,7 +178,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
             });
         }
         
-        // c) Datos de Pagos
         if (metodoPago) {
             const pagoRow = [
                 clientId,
@@ -189,7 +188,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
                 metodoPago === 'banco' ? pagoBanco.nombreBanco : pagoTarjeta.cvc,
                 metodoPago === 'banco' ? pagoBanco.titularCuenta : pagoTarjeta.titularTarjeta,
                 metodoPago === 'banco' ? pagoBanco.socialCuenta : '',
-                
             ];
             await sheets.spreadsheets.values.append({
                 spreadsheetId: SPREADSHEET_ID,
@@ -207,7 +205,6 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
     }
 });
 
-// Helper para convertir fecha de ISO a US
 function isoToUs(iso) {
     if (!iso) return "";
     const [y, m, d] = iso.split("-");
