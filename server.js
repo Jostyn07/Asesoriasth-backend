@@ -53,30 +53,27 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 
 // Función para actualizar el color de las celdas
 async function repeatCell(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
-    const requests = [{
-        updateCells: {
-            range: {
-                sheetId: await getSheetId(sheets, spreadsheetId, sheetName),
-                startRowIndex: startRowIndex,
-                endRowIndex: startRowIndex + numRows,
-                startColumnIndex: 0,
-                endColumnIndex: 25 // Asume que tienes 25 columnas (A-Y)
-            },
-            rows: Array(numRows).fill({
-                values: [{
-                    userEnteredFormat: {
-                        backgroundColor: color
-                    }
-                }]
-            }),
-            fields: 'userEnteredFormat.backgroundColor'
-        }
-    }];
-
+    const sheetId = await getSheetId(sheets, spreadsheetId, sheetName);
     await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
-            requests
+            requests: [{
+                repeatCell: {
+                    range: {
+                        sheetId,
+                        startRowIndex,
+                        endRowIndex: startRowIndex + numRows,
+                        startColumnIndex: 0,
+                        endColumnIndex: 25 // Asume 25 columnas (A-Y)
+                    },
+                    cell: {
+                        userEnteredFormat: {
+                            backgroundColor: color
+                        }
+                    },
+                    fields: "userEnteredFormat.backgroundColor"
+                }
+            }]
         }
     });
 }
