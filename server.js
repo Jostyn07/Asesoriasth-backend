@@ -15,14 +15,27 @@ const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
-let auth;try {
-auth = new google.auth.GoogleAuth({
-scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-});
-console.log('Autenticación de Google configurada.');
+let auth;
+try {
+    const secretFilePath = process.env.NODE_ENV === 'production' 
+        ? '/etc/secrets/Documentos_json' 
+        : path.join(__dirname, 'Documentos.json');
+
+    if (fs.existsSync(secretFilePath)) {
+        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
+        const credentials = JSON.parse(credentialsContent);
+        
+        auth = new google.auth.GoogleAuth({
+            credentials: credentials,
+            scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+        });
+        console.log('Autenticación de Google configurada.');
+    } else {
+        throw new Error('No se encontró el archivo de credenciales.');
+    }
 } catch (error) {
-console.error('Error al configurar la autenticación de Google:', error);
-process.exit(1);
+    console.error('Error al configurar la autenticación de Google:', error);
+    process.exit(1);
 }
 
 const app = express();
@@ -51,36 +64,43 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
     return sheet.properties.sheetId;
 }
 
-// Función para actualizar el color de las celdas
-async function repeatCell(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
-    const sheetId = await getSheetId(sheets, spreadsheetId, sheetName);
+// Función para actualizar el color de las filas
+async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
+    const requests = [{
+        updateCells: {
+            range: {
+                sheetId: await getSheetId(sheets, spreadsheetId, sheetName),
+                startRowIndex: startRowIndex,
+                endRowIndex: startRowIndex + numRows,
+                startColumnIndex: 0,
+                endColumnIndex: 25 // Asume que tienes 25 columnas (A-Y)
+            },
+            rows: Array(numRows).fill({
+                values: [{
+                    userEnteredFormat: {
+                        backgroundColor: color
+                    }
+                }]
+            }),
+            fields: 'userEnteredFormat.backgroundColor'
+        }
+    }];
+
     await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
-            requests: [{
-                repeatCell: {
-                    range: {
-                        sheetId,
-                        startRowIndex,
-                        endRowIndex: startRowIndex + numRows,
-                        startColumnIndex: 0,
-                        endColumnIndex: 25 // Asume 25 columnas (A-Y)
-                    },
-                    cell: {
-                        userEnteredFormat: {
-                            backgroundColor: color
-                        }
-                    },
-                    fields: "userEnteredFormat.backgroundColor"
-                }
-            }]
+            requests
         }
     });
 }
 
 // Endpoint unificado para recibir todo el formulario
-app.post('/api/upload-files', upload.array('files'), async (req, res) => {
+app.post('/api/submit-form', upload.array('files'), async (req, res) => {
     try {
+        if (!req.body || !req.body.formData) {
+            return res.status(400).json({ error: 'Datos del formulario faltantes o en formato incorrecto.' });
+        }
+        
         const data = JSON.parse(req.body.formData);
         const { nombre, apellidos, poBox, direccion, casaApartamento, condado, ciudad, codigoPostal,
             cignaPlans, dependents, metodoPago, pagoBanco, pagoTarjeta, ...obamacareData } = data;
@@ -191,9 +211,10 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
         const appendedRange = response.data.updates.updatedRange;
         const startRowIndex = parseInt(appendedRange.match(/\d+/)[0]) - 1;
 
-        // Titular sin color (blanco por defecto)
-        // Dependientes en amarillo
-        const dependienteColor = { red: 1.0, green: 1.0, blue: 0.0 };
+        const titularColor = { red: 0.8, green: 0.9, blue: 1.0 };
+        const dependienteColor = { red: 0.9, green: 0.9, blue: 0.9 };
+
+        await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex, 1, titularColor);
 
         if (dependentsRows.length > 0) {
             await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
@@ -257,6 +278,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
-
-
-
