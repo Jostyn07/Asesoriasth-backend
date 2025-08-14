@@ -8,27 +8,18 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 
-// Solo necesitamos el ID de la carpeta de Drive en el back-end
+const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
+const SHEET_NAME_OBAMACARE = "Pólizas";
+const SHEET_NAME_CIGNA = "Cigna Complementario";
+const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 let auth;
 try {
-    const secretFilePath = process.env.NODE_ENV === 'production' 
-        ? '/etc/secrets/Documentos_json' 
-        : path.join(__dirname, 'Documentos.json');
-
-    if (fs.existsSync(secretFilePath)) {
-        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
-        const credentials = JSON.parse(credentialsContent);
-        
-        auth = new google.auth.GoogleAuth({
-            credentials: credentials,
-            scopes: ['https://www.googleapis.com/auth/drive']
-        });
-        console.log('Autenticación de Google configurada (solo Drive).');
-    } else {
-        throw new Error('No se encontró el archivo de credenciales.');
-    }
+    auth = new google.auth.GoogleAuth({
+        scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+    });
+    console.log('Autenticación de Google configurada.');
 } catch (error) {
     console.error('Error al configurar la autenticación de Google:', error);
     process.exit(1);
@@ -50,10 +41,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json());
 
-// Endpoint dedicado para la subida de archivos
 app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
-        const { nombre, apellidos, clientId } = req.body;
+        const { nombre, apellidos } = req.body;
         
         if (!req.files || req.files.length === 0) {
             return res.status(400).json({ error: 'No se subieron archivos.' });
@@ -63,10 +53,9 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
         const drive = google.drive({ version: 'v3', auth });
 
         for (const file of req.files) {
-            const fileName = `${nombre}-${apellidos}-${clientId}-${Date.now()}-${file.originalname}`;
+            const fileName = `${nombre}-${apellidos}-${Date.now()}-${file.originalname}`;
             const fileMetadata = { name: fileName, parents: [DRIVE_FOLDER_ID] };
             
-            // Corrección: Usar `Readable.from` de manera correcta
             const media = {
                 mimeType: file.mimetype,
                 body: Readable.from(file.buffer)
