@@ -82,7 +82,7 @@ async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRow
 }
 
 // Endpoint unificado para recibir todo el formulario
-app.post('/api/submit-form', upload.array('files'), async (req, res) => {
+app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
         const data = JSON.parse(req.body.formData);
         const { nombre, apellidos, poBox, direccion, casaApartamento, condado, ciudad, codigoPostal,
@@ -260,4 +260,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
 
