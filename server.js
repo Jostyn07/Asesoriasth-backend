@@ -1,59 +1,90 @@
-// server.js
-require('dotenv').config();
-const { Readable } = require('stream'); 
 const express = require('express');
-const { google } = require('googleapis');
+const cors = require('cors');
 const multer = require('multer');
-const cors = require('cors'); 
-const fs = require('fs');
-const path = require('path');
-
-const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
-const SHEET_NAME_OBAMACARE = "Pólizas";
-const SHEET_NAME_CIGNA = "Cigna Complementario";
-const SHEET_NAME_PAGOS = "Pagos";
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
-
-let auth;
-try {
-    auth = new google.auth.GoogleAuth({
-        scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-    });
-    console.log('Autenticación de Google configurada.');
-} catch (error) {
-    console.error('Error al configurar la autenticación de Google:', error);
-    process.exit(1);
-}
+const {
+    google
+} = require('googleapis');
+require('dotenv').config();
 
 const app = express();
-const upload = multer();
-const allowedOrigins = ["https://asesoriasth.com", "http://127.0.0.1:5500"];
-const corsOptions = {
-    origin: function (origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error("No autorizado por CORS"));
-        }
-    },
+const port = process.env.PORT || 3000;
+
+// Configuración de CORS
+app.use(cors({
+    origin: true,
     credentials: true,
-};
-app.use(cors(corsOptions));
-app.use(express.json());
+}));
+app.use(express.json()); // para parsear application/json
 
-app.post('/api/submit-form', upload.array('files'), async (req, res) => {
-    // ... Tu lógica de procesamiento del formulario y escritura en Sheets
-    // ... sigue igual, no necesita cambios aquí.
+// Configuración de Multer para manejar la subida de archivos en memoria
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage
 });
 
-function isoToUs(iso) {
-    if (!iso) return "";
-    const [y, m, d] = iso.split("-");
-    return `${m}/${d}/${y}`;
-}
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+// Autenticación con Google como cuenta de servicio
+const auth = new google.auth.GoogleAuth({
+    keyFile: "Documentos.json",
+    scopes: ['https://www.googleapis.com/auth/drive'],
 });
 
+const drive = google.drive({
+    version: 'v3',
+    auth
+});
+
+// Endpoint para subir archivos
+app.post('/api/upload-files', upload.array('files'), async (req, res) => {
+    try {
+        const authClient = await auth.getClient();
+        google.options({
+            auth: authClient
+        });
+
+        if (!req.files || req.files.length === 0) {
+            return res.status(400).json({
+                error: "No se subió ningún archivo."
+            });
+        }
+
+        const uploadPromises = req.files.map(file => {
+            const fileMetadata = {
+                'name': file.originalname,
+                parents: [process.env.DRIVE_FOLDER_ID || '1zxpiKTAgF6ZPDF3hi40f7CRWY8QXVqRE'],
+            };
+            const media = {
+                mimeType: file.mimetype,
+                body: file.buffer,
+            };
+
+            return drive.files.create({
+                resource: fileMetadata,
+                media: media,
+                fields: 'id',
+            });
+        });
+
+        await Promise.all(uploadPromises);
+
+        console.log("Archivos subidos exitosamente a Google Drive.");
+        res.status(200).json({
+            message: "Archivos subidos correctamente."
+        });
+
+    } catch (error) {
+        console.error("Error al subir archivos a Google Drive:", error);
+        res.status(500).json({
+            error: "Error interno del servidor al subir archivos."
+        });
+    }
+});
+
+// Endpoint para probar el servidor
+app.get('/api/status', (req, res) => {
+    res.status(200).send('Backend is running.');
+});
+
+// Iniciar el servidor
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
