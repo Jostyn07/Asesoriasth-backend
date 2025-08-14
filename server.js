@@ -17,10 +17,22 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 
 let auth;
 try {
-    auth = new google.auth.GoogleAuth({
-        scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
-    });
-    console.log('Autenticación de Google configurada.');
+    const secretFilePath = process.env.NODE_ENV === 'production' 
+        ? '/etc/secrets/Documentos_json' 
+        : path.join(__dirname, 'Documentos.json');
+
+    if (fs.existsSync(secretFilePath)) {
+        const credentialsContent = fs.readFileSync(secretFilePath, 'utf8');
+        const credentials = JSON.parse(credentialsContent);
+        
+        auth = new google.auth.GoogleAuth({
+            credentials: credentials,
+            scopes: ['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets']
+        });
+        console.log('Autenticación de Google configurada.');
+    } else {
+        throw new Error('No se encontró el archivo de credenciales.');
+    }
 } catch (error) {
     console.error('Error al configurar la autenticación de Google:', error);
     process.exit(1);
@@ -195,10 +207,9 @@ app.post('/api/submit-form', upload.array('files'), async (req, res) => {
         const appendedRange = response.data.updates.updatedRange;
         const startRowIndex = parseInt(appendedRange.match(/\d+/)[0]) - 1;
 
-        const titularColor = { red: 0.8, green: 0.9, blue: 1.0 };
-        const dependienteColor = { red: 0.9, green: 0.9, blue: 0.9 };
-
-        await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex, 1, titularColor);
+        // Titular sin color (blanco por defecto)
+        // Dependientes en amarillo
+        const dependienteColor = { red: 1.0, green: 1.0, blue: 0.0 };
 
         if (dependentsRows.length > 0) {
             await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
@@ -262,4 +273,3 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
-
