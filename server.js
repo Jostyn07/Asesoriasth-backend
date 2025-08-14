@@ -97,6 +97,88 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     }
 });
 
+// Función para actualizar el color de las filas
+async function colorRows(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
+    const requests = [{
+        updateCells: {
+            range: {
+                sheetId: await getSheetId(sheets, spreadsheetId, sheetName),
+                startRowIndex: startRowIndex,
+                endRowIndex: startRowIndex + numRows,
+                startColumnIndex: 0,
+                endColumnIndex: 25 // Asume que tienes 25 columnas (A-Y)
+            },
+            rows: Array(numRows).fill({
+                values: [{
+                    userEnteredFormat: {
+                        backgroundColor: color
+                    }
+                }]
+            }),
+            fields: 'userEnteredFormat.backgroundColor'
+        }
+    }];
+
+    await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+            requests
+        }
+    });
+}
+
+// Helper para obtener el sheetId por su nombre
+async function getSheetId(sheets, spreadsheetId, sheetName) {
+    const res = await sheets.spreadsheets.get({
+        spreadsheetId
+    });
+    const sheet = res.data.sheets.find(s => s.properties.title === sheetName);
+    if (!sheet) throw new Error(`Hoja de cálculo no encontrada: ${sheetName}`);
+    return sheet.properties.sheetId;
+}
+
+
+// ... (continúa dentro del app.post) ...
+app.post('/api/submit-form', upload.array('files'), async (req, res) => {
+    try {
+        // ... (Tu lógica para procesar datos y subir archivos) ...
+
+        const sheets = google.sheets({ version: 'v4', auth });
+        const titularColor = { red: 0.8, green: 0.9, blue: 1.0 }; // Azul claro
+        const dependienteColor = { red: 0.9, green: 0.9, blue: 0.9 }; // Gris claro
+
+        // ... (Construcción de titularRow y dependentsRows) ...
+        const allRows = [titularRow, ...dependentsRows];
+
+        const response = await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME_OBAMACARE}!A:Z`,
+            valueInputOption: 'USER_ENTERED',
+            resource: { values: allRows }
+        });
+
+        // Obtener el rango de las filas agregadas
+        const appendedRange = response.data.updates.updatedRange;
+        const startRowIndex = parseInt(appendedRange.match(/\d+/)[0]) - 1;
+
+        // Aplicar color a la fila del titular
+        await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex, 1, titularColor);
+
+        // Aplicar color a las filas de los dependientes
+        if (dependentsRows.length > 0) {
+            await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
+        }
+        
+        // ... (Tu lógica para Cigna y Pagos sigue igual) ...
+
+        res.status(200).json({ message: 'Formulario procesado correctamente' });
+
+    } catch (error) {
+        console.error('Error al procesar el formulario:', error);
+        res.status(500).json({ error: 'Error interno del servidor al procesar el formulario.' });
+    }
+});
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
