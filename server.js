@@ -51,33 +51,6 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
     return sheet.properties.sheetId;
 }
 
-// Función para actualizar el color de las celdas
-async function repeatCell(sheets, spreadsheetId, sheetName, startRowIndex, numRows, color) {
-    const sheetId = await getSheetId(sheets, spreadsheetId, sheetName);
-    await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        requestBody: {
-            requests: [{
-                repeatCell: {
-                    range: {
-                        sheetId,
-                        startRowIndex,
-                        endRowIndex: startRowIndex + numRows,
-                        startColumnIndex: 0,
-                        endColumnIndex: 25 // Asume 25 columnas (A-Y)
-                    },
-                    cell: {
-                        userEnteredFormat: {
-                            backgroundColor: color
-                        }
-                    },
-                    fields: "userEnteredFormat.backgroundColor"
-                }
-            }]
-        }
-    });
-}
-
 // Endpoint unificado para recibir todo el formulario
 app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
@@ -190,14 +163,6 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
 
         const appendedRange = response.data.updates.updatedRange;
         const startRowIndex = parseInt(appendedRange.match(/\d+/)[0]) - 1;
-
-        // Titular sin color (blanco por defecto)
-        // Dependientes en amarillo
-        const dependienteColor = { red: 1.0, green: 1.0, blue: 0.0 };
-
-        if (dependentsRows.length > 0) {
-            await colorRows(sheets, SPREADSHEET_ID, SHEET_NAME_OBAMACARE, startRowIndex + 1, dependentsRows.length, dependienteColor);
-        }
         
         if (cignaPlans && cignaPlans.length > 0) {
             const cignaRows = cignaPlans.map(plan => [
@@ -257,6 +222,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
 
 
 
