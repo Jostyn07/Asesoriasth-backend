@@ -55,7 +55,7 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
         const nombre = req.body.nombre || "SinNombre";
-        const apellidos = req.body.apellido || "SinApellido";
+        const apellidos = req.body.apellidos || "SinApellido";
         const uploadedFileLinks = [];
         if (req.files && req.files.length > 0) {
             const drive = google.drive({ version: 'v3', auth });
