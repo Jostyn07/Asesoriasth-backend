@@ -64,7 +64,7 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
         const folderMetadata = {
             'name' : folderName,
             'mimeType' : 'application/vnd.google-apps.folder',
-            'parents': [DRIVE_FOLDER_ID]
+            'parents': [GOOGLE_DRIVE_FOLDER_ID]
         };
 
         const folderResponse = await drive.files.create({ // <--- Usamos la instancia 'drive' ya autenticada
@@ -127,6 +127,7 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
 
 
 
