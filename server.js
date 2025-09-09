@@ -53,7 +53,7 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
 }
 
 // Endpoint para crear carpeta y subir archivos a Google Drive
-app.post('/create-folder', async (req, res) => {
+app.post('/api/create-folder', async (req, res) => {
   try {
     const folderName = req.body.folderName;
     if (!folderName) {
