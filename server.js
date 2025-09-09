@@ -56,41 +56,12 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
         const nombre = req.body.nombre || "SinNombre";
         const apellidos = req.body.apellidos || "SinApellido";
-        const telefono = req.body.telefono || "SinTelefono";
-
-        const folderName = `${nombre}-${apellidos}-${telefono}-${Date.now()}`;
-
-        // crear carpeta en Drive
-        const folderMetadata = {
-            'name' : folderName,
-            'mimeType' : 'application/vnd.google-apps.folder',
-            'parents': [DRIVE_FOLDER_ID]
-        };
-
-        const folderResponse = await drive.files.create({ // <--- Usamos la instancia 'drive' ya autenticada
-            resource: folderMetadata,
-            fields: 'id',
-            supportsAllDrives: true
-        });
-        const folderId = folderResponse.data.id;
-
-        //Asignar permisos a la carpeta
-        await drive.permissions.create({
-            fileId: folderId,
-            requestBody: {
-                role: 'reader',
-                type: 'anyone'
-            },
-            supportsAllDrives: true
-        });
-
-        console.log(`Procesando formulario para: ${folderName}`);
         const uploadedFileLinks = [];
         if (req.files && req.files.length > 0) {
+            const drive = google.drive({ version: 'v3', auth });
             for (const file of req.files) {
-                const fileName = `${file.originalname}`;
-                // Actualiza el parent para que los archivos se suban a la carpeta creada
-                const fileMetadata = { name: fileName, parents: [folderId] }; 
+                const fileName = `${nombre}-${apellidos}-${Date.now()}-${file.originalname}`;
+                const fileMetadata = { name: fileName, parents: [DRIVE_FOLDER_ID] };
                 
                 const media = {
                     mimeType: file.mimetype,
@@ -117,6 +88,7 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
         res.status(500).json({ error: 'Error interno del servidor al procesar el formulario.' });
     }
 });
+
 function usToIso(us) {
     if (!us) return "";
     const [m, d, y] = us.split("/");
@@ -127,9 +99,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
-
-
-
-
 
 
