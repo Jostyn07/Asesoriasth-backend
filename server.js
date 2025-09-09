@@ -8,7 +8,6 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('url');
-const getAuthenticatedClient = require('./auth');
 
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
 const SHEET_NAME_OBAMACARE = "Pólizas";
@@ -52,75 +51,44 @@ async function getSheetId(sheets, spreadsheetId, sheetName) {
     return sheet.properties.sheetId;
 }
 
-// Endpoint para crear carpeta y subir archivos a Google Drive
-app.post('/api/create-folder', async (req, res) => {
-  try {
-    const folderName = req.body.folderName;
-    if (!folderName) {
-      return res.status(400).send('El nombre de la carpeta es requerido.');
-    }
-
-    // Usa tu función de autenticación
-    const authClient = await getAuthenticatedClient();
-    const drive = google.drive({ version: 'v3', auth: authClient });
-
-    const fileMetadata = {
-      name: folderName,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [DRIVE_FOLDER_ID], // Usa la carpeta raíz de tu .env
-    };
-
-    const response = await drive.files.create({
-      resource: fileMetadata,
-      fields: 'id',
-    });
-
-    res.status(201).send({
-      message: 'Carpeta creada exitosamente',
-      folderId: response.data.id,
-    });
-
-  } catch (error) {
-    console.error('Error al crear la carpeta:', error);
-    res.status(500).send('Error interno del servidor');
-  }
-});
-
-// Subir archivos a una carpeta específica en Google Drive
-app.post('/upload-to-folder', upload.array('files'), async (req, res) => {
+// Endpoint unificado para recibir todo el formulario
+app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     try {
-        const { folderId } = req.body;
-        if (!folderId) {
-            return res.status(400).send('El ID de la carpeta es requerido.');
-        }
-        // Usa tu función de autenticación
-        const authClient = await getAuthenticatedClient();
-        const drive = google.drive({ version: 'v3', auth: authClient });
-
-        const uploadFileLinks = [];
+        const nombre = req.body.nombre || "SinNombre";
+        const apellidos = req.body.apellidos || "SinApellido";
+        const uploadedFileLinks = [];
         if (req.files && req.files.length > 0) {
+            const drive = google.drive({ version: 'v3', auth });
             for (const file of req.files) {
-                const fileMetadata = { name: file.originalname, parents: [folderId] };
+                const fileName = `${nombre}-${apellidos}-${Date.now()}-${file.originalname}`;
+                const fileMetadata = { name: fileName, parents: [DRIVE_FOLDER_ID] };
+                
                 const media = {
                     mimeType: file.mimetype,
                     body: Readable.from(file.buffer)
                 };
+                
                 const driveResponse = await drive.files.create({
-                    resource: fileMetadata, media, fields: 'id, webViewLink', supportsAllDrives: true
+                    resource: fileMetadata, media, fields: 'id,webViewLink', supportsAllDrives: true
                 });
                 const fileInfo = driveResponse.data;
+                const fileId = fileInfo.id;
+                
                 await drive.permissions.create({
-                    fileId: fileInfo.id, requestBody: {role: 'reader', type: 'anyone'}, supportsAllDrives: true
+                    fileId: fileId, requestBody: { role: 'reader', type: 'anyone' }, supportsAllDrives: true
                 });
-                uploadFileLinks.push(`HYPERLINK("${fileInfo.webViewLink}", "${file.originalname}")`);
+
+                uploadedFileLinks.push(`HYPERLINK("${fileInfo.webViewLink}", "${fileName}")`);
             }
         }
-        res.status(200).send({ message: 'Archivos subidos exitosamente', links: uploadFileLinks });
+        res.status(200).json({ message: 'Formulario procesado correctamente' });
+
     } catch (error) {
-        console.error('Error al subir archivos:', error);
-        res.status(500).send('Error interno del servidor');
+        console.error('Error al procesar el formulario:', error);
+        res.status(500).json({ error: 'Error interno del servidor al procesar el formulario.' });
     }
 });
+
 function usToIso(us) {
     if (!us) return "";
     const [m, d, y] = us.split("/");
