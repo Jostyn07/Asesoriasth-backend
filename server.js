@@ -8,7 +8,6 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('url');
-const axios = require('axios');
 
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
 const SHEET_NAME_OBAMACARE = "Pólizas";
@@ -151,3 +150,4 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
+
