@@ -22,8 +22,7 @@ const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorno
 const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1'
-const value = [email]
-const users = await query(sql, values);
+
 
 // === 3. HELPERS ===
 
@@ -226,11 +225,11 @@ app.post('/api/submit-form-data', async (req, res) => {
 
         const insertSql = `
         INSERT INTO Policies (
-        client_id, nombre_completo, telefono, email, compania, plan_info, prima, credito_fiscal, fecha_registro, operador, observaciones, dependents_json, cigna_plan_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURN id;`;
+        client_id, nombre_completo, telefono, email, compania, plan_info, prima, credito_fiscal, fecha_registro, operador, observaciones, dependents_json, cigna_plan_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;`;
 
         const insertValues = [
             clientId,
-            nombreCompleto || null,
+            nombreCompleto,
             data.telefono || null,
             data.correo || null,
             data.compania || null,
@@ -415,6 +414,8 @@ app.post('/api/submit-form-data', async (req, res) => {
 
 app.get('/api/policies', async (req, res) => {
     try {
+        const value = [email]
+        const users = await query(sql, values);
         const sql = `
         SELECT
             client_id, nombre_completo, telefono, email, compania, plan, prima, credito_fiscal, fecha_registro, operador, observaciones, dependents_json, cigna_plans_json, fecha_creacion
