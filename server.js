@@ -57,7 +57,7 @@ const allowedOrigins = [
     "http://127.0.0.1:5500", 
     "https://asesoriasth.com/formulario.html", 
     "https://jostyn07.github.io", // Raíz de tu GitHub Pages
-    "https://jostyn07.github.io/Asesoriasth-", // Ruta del proyecto en GitHub Pages
+    "https://jostyn07.github.io/Asesoriasth", // Ruta del proyecto en GitHub Pages
     "https://asesoriasth-backend-der.onrender.com" // Tu propio dominio de Render
 ];
 const corsOptions = {
@@ -437,4 +437,5 @@ app.get('/api/policies', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
+
 });
