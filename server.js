@@ -13,6 +13,7 @@ import cors from 'cors';
 import bcrypt from 'bcrypt'; 
 // Importamos la función de query para PostgreSQL
 import { query } from './db.js';
+import { resolve } from 'path';
 
 // === 2. CONSTANTES ===
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
@@ -20,6 +21,9 @@ const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorno
+const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1'
+const value = [email]
+const users = await query(sql, values);
 
 // === 3. HELPERS ===
 
@@ -57,7 +61,7 @@ const allowedOrigins = [
     "http://127.0.0.1:5500", 
     "https://asesoriasth.com/formulario.html", 
     "https://jostyn07.github.io", // Raíz de tu GitHub Pages
-    "https://jostyn07.github.io/Asesoriasth", // Ruta del proyecto en GitHub Pages
+    "https://jostyn07.github.io/Asesoriasth-", // Ruta del proyecto en GitHub Pages
     "https://asesoriasth-backend-der.onrender.com" // Tu propio dominio de Render
 ];
 const corsOptions = {
@@ -107,7 +111,8 @@ app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
                     user: {
                         id: user.id,
                         name: user.nombre,
-                        email: user.email
+                        email: user.email,
+                        rol: user.rol
                     }
                 });
             } else {
@@ -437,5 +442,4 @@ app.get('/api/policies', async (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
-
 });
