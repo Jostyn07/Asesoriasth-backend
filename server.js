@@ -79,7 +79,7 @@ app.use(express.json());
 
 
 // === 5. ENDPOINT DE LOGIN ===
-app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
+app.post('/api/login', async (req, res) => { 
     const { email, password } = req.body;
     console.log(`Intento de login para: ${email}`);
 
@@ -89,9 +89,8 @@ app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
 
     try {
         // 1. Buscar usuario por email
-        const sql = 'SELECT id, nombre, email, password FROM users WHERE email = $1';
+        const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1';
         const values = [email];
-        // CORREGIDO: Se usa `query` para obtener `users`
         const users = await query(sql, values);
 
         if (users.length === 1) {
