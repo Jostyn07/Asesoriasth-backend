@@ -13,7 +13,6 @@ import cors from 'cors';
 import bcrypt from 'bcrypt'; 
 // Importamos la función de query para PostgreSQL
 import { query } from './db.js';
-import { resolve } from 'path';
 
 // === 2. CONSTANTES ===
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
@@ -21,8 +20,6 @@ const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorno
-const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1'
-
 
 // === 3. HELPERS ===
 
@@ -79,7 +76,7 @@ app.use(express.json());
 
 
 // === 5. ENDPOINT DE LOGIN ===
-app.post('/api/login', async (req, res) => { 
+app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
     const { email, password } = req.body;
     console.log(`Intento de login para: ${email}`);
 
@@ -91,6 +88,7 @@ app.post('/api/login', async (req, res) => {
         // 1. Buscar usuario por email
         const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1';
         const values = [email];
+        // CORREGIDO: Se usa `query` para obtener `users`
         const users = await query(sql, values);
 
         if (users.length === 1) {
@@ -109,8 +107,7 @@ app.post('/api/login', async (req, res) => {
                     user: {
                         id: user.id,
                         name: user.nombre,
-                        email: user.email,
-                        rol: user.rol
+                        email: user.email
                     }
                 });
             } else {
@@ -158,6 +155,11 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
                     fields: 'id, webViewLink',
                     supportsAllDrives: true
                 });
+                res.status(201).send({
+                    message: 'Carpeta creada exitosamente',
+                    folderId: response.data.id,
+                    folderLink: response.data.webViewLink,
+                })
                 uploadedFileLinks.push(response.data.webViewLink);
             }
         }
@@ -222,29 +224,6 @@ app.post('/api/submit-form-data', async (req, res) => {
         const clientId = `CLI-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}` // CORREGIDO: slice.slice a slice
         const fechaRegistroUS = data.fechaRegistro || ''; // CORREGIDO: fechaRegisto a fechaRegistro
 
-        const insertSql = `
-        INSERT INTO Policies (
-        client_id, nombre_completo, telefono, email, compania, plan_info, prima, credito_fiscal, fecha_registro, operador, observaciones, dependents_json, cigna_plan_json) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id;`;
-
-        const insertValues = [
-            clientId,
-            nombreCompleto,
-            data.telefono || null,
-            data.correo || null,
-            data.compania || null,
-            data.plan || null,
-            prima,
-            creditoFiscal,
-            data.fechaRegistro ? new Date(data.fechaRegistro) : new Date(),
-            data.operador || null,
-            data.observaciones || null,
-            JSON.stringify(data.dependents || []),
-            JSON.stringify(data.cignaPlans || [])
-        ];
-        
-        const dbResult = await query(insertSql, insertValues);
-        console.log(` Datos de pólza (${dbResult[0].id}) guardados en la base de datos.`) 
-
         // Preparar y enviar datos de Obamacare y dependientes
         const obamacareData = [
             data.operador || '',
@@ -257,6 +236,7 @@ app.post('/api/submit-form-data', async (req, res) => {
             data.sexo || '',
             data.correo || '',
             data.telefono || '',
+            data.telefono2 || '',
             data.fechaNacimiento || '',
             data.estadoMigratorio || '',
             data.ssn || '',
@@ -274,7 +254,8 @@ app.post('/api/submit-form-data', async (req, res) => {
             cleanCurrency(data.prima) || '',
             data.link || '',
             data.observaciones || '' , // CORREGIDO: observacion a observaciones
-            clientId,          
+            clientId,
+            data.folderLink || '',          
         ];
         
         let obamacareRows = [obamacareData];
@@ -295,14 +276,14 @@ app.post('/api/submit-form-data', async (req, res) => {
                 '', // Teléfono
                 dep.fechaNacimiento || '',
                 dep.estadoMigratorio || '',
-                dep.ssn || '',
+                dep.ssn || '', 
                 '', // Ingresos
                 '', // Ocupación
                 '', // Nacionalidad
                 dep.aplica || '',
                 '', // Cantidad de dependientes
                 '', // Dirección completa (vacío para dependientes)
-                '', '', '', '', '', '', '', // Campos de Póliza vacíos
+                '', '', '', '', '', '', // Campos de Póliza vacíos
                 clientId
             ]);
         });
@@ -400,7 +381,7 @@ app.post('/api/submit-form-data', async (req, res) => {
         }
 
         res.status(200).json({
-            message: 'Datos del formulario enviados a DB y sheets exitosamente',
+            message: 'Datos del formulario enviados exitosamente',
             clientId: clientId,
             folderName: `${data.nombre} ${data.apellidos} ${data.telefono}`.trim()
         });
@@ -408,32 +389,6 @@ app.post('/api/submit-form-data', async (req, res) => {
     } catch (error) {
         console.error('Error al enviar el formulario:', error.errors || error.message || error);
         res.status(500).json({ error: 'Error interno al enviar el formulario a sheets'});
-    }
-})
-
-app.get('/api/policies', async (req, res) => {
-    try {
-        const value = [email]
-        const users = await query(sql, values);
-        const sql = `
-        SELECT
-            client_id, nombre_completo, telefono, email, compania, plan, prima, credito_fiscal, fecha_registro, operador, observaciones, dependents_json, cigna_plans_json, fecha_creacion
-            FROM policies
-            ORDER BY fecha_creacion DESC;
-            `;
-        const policies = await query(sql);
-        if (policies.length === 0) {
-            return res.status(200).json({ message: 'No hay pólizas registradas.', data: []});
-        }
-
-        res.status(200).json({
-            message: 'Pólizas obtenidas exitosamente',
-            data: policies
-        });
-
-    } catch (error) {
-        console.error('Error al consultar la base e datos para pólizas:', error.message || error);
-        res.status(500).json({ error: 'Error interno del servidor al obtener pólizas'})
     }
 })
 
