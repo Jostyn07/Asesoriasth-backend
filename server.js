@@ -13,6 +13,8 @@ import cors from 'cors';
 import bcrypt from 'bcrypt'; 
 // Importamos la función de query para PostgreSQL
 import { query } from './db.js';
+import { error } from 'console';
+import { version } from 'os';
 
 // === 2. CONSTANTES ===
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
@@ -130,9 +132,15 @@ app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
 app.post('/api/upload-files', upload.array('files'), async (req, res) => {
     // ... (El código de upload.array('files') parece mayormente correcto, se mantiene)
     try {
-        const { folderId, nombre, apellidos, telefono} = req.body;
-        if (!folderId) {
-          return res.status(400).json({ error: 'El ID de la carpeta es requerido.' });
+        const { folderId, folderLink, nombre, apellidos, telefono} = req.body;
+        let targetFolderId = folderId || null;
+        if (!targetFolderId && folderLink) {
+          const m = String(folderLink).match(/folders\/([a-zA-Z0-9_\-]+)/);
+          if (m) targetFolderId = m[1];
+        }
+        
+        if (!targetFolderId) {
+            return res.status(400).json({ error: 'El ID de la carpeta es requerido.'})
         }
 
         const authClient = await getAuthenticatedClient();
@@ -143,7 +151,7 @@ app.post('/api/upload-files', upload.array('files'), async (req, res) => {
             for (const file of req.files) {
                 const fileMetadata = {
                     name: file.originalname,
-                    parents: [folderId]
+                    parents: [targetFolderId]
                 };
                 const media = {
                     mimeType: file.mimetype,
@@ -220,11 +228,36 @@ app.post('/api/submit-form-data', async (req, res) => {
 
         const authClient = await getAuthenticatedClient();
         const sheets = google.sheets({ version: 'v4', auth: authClient });
+        const drive = google.drive({ version: 'v3', auth: authClient });
 
         const clientId = `CLI-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}` // CORREGIDO: slice.slice a slice
         const fechaRegistroUS = data.fechaRegistro || ''; // CORREGIDO: fechaRegisto a fechaRegistro
 
         // Preparar y enviar datos de Obamacare y dependientes
+        // Crear carpeta en Drive para este cliente y obtener folderId/folderLink
+        let folderId = null;
+        let folderLink = "";
+        try {
+          const folderName = `${(data.nombre || '').trim()} ${(data.apellidos || '').trim()} ${(data.telefono || '').trim()}`.trim() || `Cliente_${Date.now()}`;
+          const folderMetadata = {
+            name: folderName,
+            mimeType: 'application/vnd.google-apps.folder',
+            parents: [DRIVE_FOLDER_ID]
+          };
+          const folderResp = await drive.files.create({
+            resource: folderMetadata,
+            fields: 'id, webViewLink',
+            supportsAllDrives: true
+          });
+          folderId = folderResp.data.id;
+          folderLink = folderResp.data.webViewLink || `https://drive.google.com/drive/folders/${folderId}`;
+          console.log('Carpeta creada en submit-form-data:', folderId, folderLink);
+        } catch (err) {
+          console.warn('No se pudo crear carpeta en submit-form-data (se continuará sin folder):', err);
+          folderId = null;
+          folderLink = "";
+        }
+
         const obamacareData = [
             data.operador || '',
             fechaRegistroUS,
@@ -255,7 +288,7 @@ app.post('/api/submit-form-data', async (req, res) => {
             data.link || '',
             data.observaciones || '' , // CORREGIDO: observacion a observaciones
             clientId,
-            folderLink || `https://drive.google.com/drive/folders/${folderId}` || "",
+            folderLink || "",
         ];
         
         let obamacareRows = [obamacareData];
@@ -274,6 +307,7 @@ app.post('/api/submit-form-data', async (req, res) => {
                 '', // Sexo
                 '', // Correo
                 '', // Teléfono
+                '', // Telefono 2
                 dep.fechaNacimiento || '',
                 dep.estadoMigratorio || '',
                 dep.ssn || '', 
@@ -283,7 +317,7 @@ app.post('/api/submit-form-data', async (req, res) => {
                 dep.aplica || '',
                 '', // Cantidad de dependientes
                 '', // Dirección completa (vacío para dependientes)
-                '', '', '', '', '', '', // Campos de Póliza vacíos
+                '', '', '', '', '', '', '', // Campos de Póliza vacíos
                 clientId
             ]);
         });
