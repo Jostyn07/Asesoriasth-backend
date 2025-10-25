@@ -255,7 +255,7 @@ app.post('/api/submit-form-data', async (req, res) => {
             data.link || '',
             data.observaciones || '' , // CORREGIDO: observacion a observaciones
             clientId,
-            data.folderLink || '',          
+            folderLink || `https://drive.google.com/drive/folders/${folderId}` || "",
         ];
         
         let obamacareRows = [obamacareData];
