@@ -13,12 +13,14 @@ import cors from 'cors';
 import bcrypt from 'bcrypt'; 
 // Importamos la función de query para PostgreSQL
 import { query } from './db.js';
+import { version } from 'os';
 
 // === 2. CONSTANTES ===
 const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
 const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
+const SHEET_NAME_DRAFTS = "Borrador";
 const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorno
 
 // === 3. HELPERS ===
@@ -392,6 +394,90 @@ app.post('/api/submit-form-data', async (req, res) => {
         res.status(500).json({ error: 'Error interno al enviar el formulario a sheets'});
     }
 })
+
+app.post('/api/drafts/save', async (req, res) => {
+    try {
+        const data = req.body;
+        const authClient = await getAuthenticatedClient();
+        const sheets = google.sheets({ version: 'v4', auth: authClient });
+
+        if (!data.draftId) {
+             return res.status(400).json({ error: 'El draftId es obligatorio para guardar el borrador.' });
+        }
+        
+        // 1. Preparar la fila de datos del borrador
+        // NOTA: Debes asegurarte de que estas columnas coincidan con tu hoja "Borrador"
+        const borradorData = [
+            data.draftId,
+            new Date(data.draftTimestamp).toLocaleString('es-ES'),
+            data.nombre || '',
+            data.apellidos || '',
+            data.telefono || '',
+            data.correo || '',
+            data.operador || '',
+            data.compania || '',
+            data.plan || '',
+            (data.dependents?.length || 0).toString(),
+            (data.cignaPlans?.length || 0).toString(),
+            data.metodoPago || '',
+            data.observaciones || '',
+            // Este campo guarda el JSON completo para la restauración
+            JSON.stringify(data, null, 0), 
+            'Activo' // Columna de Estado: Marca el borrador como pendiente
+        ];
+
+        // 2. Intentar buscar el borrador existente (Por draftId)
+        let rowIndexToUpdate = null;
+        const range = `${SHEET_NAME_DRAFTS}!A:A`; // Lee IDs
+        const existingRows = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: range,
+        });
+
+        const rows = existingRows.data.values || [];
+        for (let i = 1; i < rows.length; i++) {
+            if (rows[i][0] === data.draftId) {
+                rowIndexToUpdate = i + 1; // Fila de Sheets (base 1)
+                break;
+            }
+        }
+        
+        // 3. Determinar el método de escritura (UPDATE o APPEND)
+        let sheetAction = 'UPDATE';
+        if (!rowIndexToUpdate) {
+            // Si no se encuentra, usamos APPEND para agregar uno nuevo
+            sheetAction = 'APPEND';
+            rowIndexToUpdate = `${SHEET_NAME_DRAFTS}!A1`; // Rango para APPEND
+        } else {
+            // Si se encuentra, usamos UPDATE en la fila específica
+            rowIndexToUpdate = `${SHEET_NAME_DRAFTS}!A${rowIndexToUpdate}`;
+        }
+        
+        // 4. Ejecutar la acción
+        if (sheetAction === 'APPEND') {
+             await sheets.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: rowIndexToUpdate,
+                valueInputOption: 'USER_ENTERED',
+                insertDataOption: 'INSERT_ROWS',
+                resource: { values: [borradorData] },
+            });
+        } else {
+             await sheets.spreadsheets.values.update({
+                spreadsheetId: SPREADSHEET_ID,
+                range: rowIndexToUpdate,
+                valueInputOption: 'USER_ENTERED',
+                resource: { values: [borradorData] },
+            });
+        }
+
+        res.status(200).json({ message: 'Borrador guardado/actualizado exitosamente por Service Account.' });
+
+    } catch (error) {
+        console.error('❌ Error al guardar borrador con SA:', error.message);
+        res.status(500).json({ error: 'Error al guardar borrador en Sheets. Verifica permisos y nombre de hoja.' });
+    }
+});
 
 
 // === 9. INICIO DEL SERVIDOR ===
