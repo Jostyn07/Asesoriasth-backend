@@ -408,22 +408,29 @@ app.post('/api/drafts/save', async (req, res) => {
         // 1. Preparar la fila de datos del borrador
         // NOTA: Debes asegurarte de que estas columnas coincidan con tu hoja "Borrador"
         const borradorData = [
-            data.draftId,
-            new Date(data.draftTimestamp).toLocaleString('es-ES'),
-            data.nombre || '',
-            data.apellidos || '',
-            data.telefono || '',
-            data.correo || '',
-            data.operador || '',
-            data.compania || '',
-            data.plan || '',
-            (data.dependents?.length || 0).toString(),
-            (data.cignaPlans?.length || 0).toString(),
-            data.metodoPago || '',
-            data.observaciones || '',
-            // Este campo guarda el JSON completo para la restauración
-            JSON.stringify(data, null, 0), 
-            'Activo' // Columna de Estado: Marca el borrador como pendiente
+            data.draftId || '',                 // A: DRAFT_ID
+            new Date(data.draftTimestamp).toLocaleString('es-ES'), // B: TIMESTAMP_GUARDADO
+            data.nombre || '',                 // C: Nombre
+            data.apellidos || '',              // D: Apellido
+            data.telefono || '',               // E: Teléfono
+            data.correo || '',                 // F: Correo
+            data.operador || '',               // G: Operador
+            data.compania || '',               // H: Compañía
+            data.plan || '',                   // I: Plan
+            data.estadoMigratorio || '',       // J: Estado migratorio
+            data.cantidadDependientes || '0',  // K: Cant. dependientes declarada
+            (data.dependents?.length || 0).toString(), // L: Can. dependientes real (usamos el real)
+            (data.cignaPlans?.length || 0).toString(), // M: Cant. planes cigna
+            data.metodoPago || '',             // N: Método de pago
+            // Columnas calculadas que deben implementarse en el frontend (formulario.js):
+            // Usamos placeholders para evitar fallos de rango.
+            'N/A',                             // O: %Completado
+            'N/A',                             // P: Secciones completadas
+            data.observaciones || '',          // Q: Observaciones (usa 'observaciones' del formulario)
+            // Datos críticos para la restauración:
+            JSON.stringify(data, null, 0),     // R: JSON_COMPLETO
+            'Activo',                          // S: Estado
+            ''
         ];
 
         // 2. Intentar buscar el borrador existente (Por draftId)
