@@ -30,10 +30,25 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorn
  * almacenadas en la variable de entorno GOOGLE_SA_CREDENTIALS de Render.
  */
 async function getAuthenticatedClient() {
-    // CRÍTICO: Asegurarse de que esta variable de entorno contenga el JSON completo
-    const credentials = JSON.parse(process.env.GOOGLE_SA_CREDENTIALS);
+// CRÍTICO: 1. Verifica si la variable de entorno existe y 2. Parsea el JSON.
+    const credentialsString = process.env.GOOGLE_SA_CREDENTIALS;
 
-    const authClient = new google.auth.GoogleAuth ({ // CORREGIDO: .aut a .auth
+    if (!credentialsString || credentialsString === 'undefined' || credentialsString.trim() === '') {
+        console.error('❌ CRÍTICO: La variable GOOGLE_SA_CREDENTIALS no está configurada o está vacía.');
+        // Lanza un error claro que será capturado por los endpoints
+        throw new Error('No se pudieron cargar las credenciales del servicio de Google. Por favor, revisa la variable GOOGLE_SA_CREDENTIALS en Render.');
+    }
+
+    let credentials;
+    try {
+        credentials = JSON.parse(credentialsString); // Intentamos parsear el JSON
+    } catch (e) {
+        console.error('❌ CRÍTICO: Error al parsear GOOGLE_SA_CREDENTIALS como JSON:', e.message);
+        throw new Error('Las credenciales de Google no son un JSON válido.');
+    }
+    
+    // Si llegamos aquí, las credenciales son válidas
+    const authClient = new google.auth.GoogleAuth ({
         credentials, // Usamos las credenciales JSON del entorno
         scopes: [
             'https://www.googleapis.com/auth/drive',
