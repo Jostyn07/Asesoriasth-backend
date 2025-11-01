@@ -286,8 +286,15 @@ app.post('/api/submit-form-data', async (req, res) => {
                 dep.aplica || '',
                 '', // Cantidad de dependientes
                 '', // Dirección completa (vacío para dependientes)
-                '', '', '', '', '', '', '', // Campos de Póliza vacíos
-                clientId
+                '', 
+                '', 
+                '', 
+                '', 
+                '', 
+                '', 
+                '', // Campos de Póliza vacíos
+                clientId,
+                ''
             ]);
         });
         }
