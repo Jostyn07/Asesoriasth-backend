@@ -266,35 +266,34 @@ app.post('/api/submit-form-data', async (req, res) => {
         if (data.dependents && data.dependents.length > 0) {
         data.dependents.forEach(dep => {
             obamacareRows.push([
-                data.operador || '', 
-                fechaRegistroUS,
-                data.tipoVenta || '',
-                data.claveSeguridad || '',
-                dep.parentesco || '',
-                dep.nombre || '',
-                dep.apellido || '',
-                '', // Sexo
-                '', // Correo
-                '', // Teléfono
-                '', // Telefono 2
-                dep.fechaNacimiento || '',
-                dep.estadoMigratorio || '',
-                dep.ssn || '', 
-                '', // Ingresos
-                '', // Ocupación
-                '', // Nacionalidad
-                dep.aplica || '',
-                '', // Cantidad de dependientes
-                '', // Dirección completa (vacío para dependientes)
-                '', 
-                '', 
-                '', 
-                '', 
-                '', 
-                '', 
-                '', // Campos de Póliza vacíos
-                clientId,
-                ''
+                data.operador || '', // 1
+                fechaRegistroUS, // 2
+                data.tipoVenta || '', // 3
+                data.claveSeguridad || '', // 4
+                dep.parentesco || '', // 5
+                dep.nombre || '', // 6
+                dep.apellido || '', // 7
+                '', // Sexo 8
+                '', // Correo 9
+                '', // Teléfono 10
+                '', // Telefono 2 (11)
+                dep.fechaNacimiento || '', // (12)
+                dep.estadoMigratorio || '', // 13
+                dep.ssn || '', // 14
+                '', // Ingresos 15
+                '', // Ocupación 16
+                '', // Nacionalidad 17
+                dep.aplica || '', // 18
+                '', // Cantidad de dependientes 19
+                '', // Dirección completa (vacío para dependientes) 20
+                '', // Compañia 21
+                '', // Plan 22
+                '', // Credito fiscal 23
+                '', // Prima 24
+                '', // Link 25
+                '', // Observación 26
+                clientId, // 27
+                '' //Vacio 28
             ]);
         });
         }
