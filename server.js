@@ -27,14 +27,14 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorn
 
 /**
  * Obtiene un cliente autenticado usando las credenciales de Service Account 
- * almacenadas en la variable de entorno GOOGLE_SA_CREDENTIALS de Render.
+ * almacenadas en la variable de entorno GOOGLE_APPLICATION_CREDENTIALS de Render.
  */
 async function getAuthenticatedClient() {
 // CRÍTICO: 1. Verifica si la variable de entorno existe y 2. Parsea el JSON.
-    const credentialsString = process.env.GOOGLE_SA_CREDENTIALS;
+    const credentialsString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
     if (!credentialsString || credentialsString === 'undefined' || credentialsString.trim() === '') {
-        console.error('❌ CRÍTICO: La variable GOOGLE_SA_CREDENTIALS no está configurada o está vacía.');
+        console.error('❌ CRÍTICO: La variable GOOGLE_APPLICATION_CREDENTIALS no está configurada o está vacía.');
         // Lanza un error claro que será capturado por los endpoints
         throw new Error('No se pudieron cargar las credenciales del servicio de Google. Por favor, revisa la variable GOOGLE_SA_CREDENTIALS en Render.');
     }
@@ -43,7 +43,7 @@ async function getAuthenticatedClient() {
     try {
         credentials = JSON.parse(credentialsString); // Intentamos parsear el JSON
     } catch (e) {
-        console.error('❌ CRÍTICO: Error al parsear GOOGLE_SA_CREDENTIALS como JSON:', e.message);
+        console.error('❌ CRÍTICO: Error al parsear GOOGLE_APPLICATION_CREDENTIALS como JSON:', e.message);
         throw new Error('Las credenciales de Google no son un JSON válido.');
     }
     
