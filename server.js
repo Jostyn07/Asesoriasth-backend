@@ -451,83 +451,113 @@ app.post('/api/submit-form-data', async (req, res) => {
 
     console.log(`✅ Cliente guardado en PostgreSQL con ID: ${clientId}`);
 
-    // ========== 2. GUARDAR EN GOOGLE SHEETS (si está disponible) ==========
-    try {
-      const authClient = await getAuthenticatedClient();
-      const sheets = google.sheets({ version: 'v4', auth: authClient });
-      const fechaRegistroUS = data.fechaRegistro || '';
+    // ========== 2. GUARDAR EN GOOGLE SHEETS (CRÍTICO - CON REINTENTOS) ==========
+    let sheetsSuccess = false;
+    let sheetsError = null;
+    const MAX_RETRIES = 3;
 
-      // Preparar datos de Obamacare para Sheets
-      const obamacareData = [
-        data.operador || '',
-        fechaRegistroUS,
-        data.tipoVenta || '',
-        data.claveSeguridad || '',
-        'Titular',
-        data.nombre || '',
-        data.apellidos || '',
-        data.sexo || '',
-        data.correo || '',
-        data.telefono || '',
-        data.telefono2 || '',
-        data.fechaNacimiento || '',
-        data.estadoMigratorio || '',
-        data.ssn || '',
-        cleanCurrency(data.ingresos) || '',
-        data.ocupacion || '',
-        data.nacionalidad || '',
-        data.aplica || '',
-        data.cantidadDependientes || '0',
-        data.poBox ? `PO Box: ${data.poBox}` :
-          `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),
-        data.compania || '',
-        data.plan || '',
-        cleanCurrency(data.creditoFiscal) || '',
-        cleanCurrency(data.prima) || '',
-        data.link || '',
-        data.observaciones || '',
-        `CLI-${clientId}`,
-      ];
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`📊 Intento ${attempt}/${MAX_RETRIES} de guardar en Google Sheets...`);
 
-      let obamacareRows = [obamacareData];
+        const authClient = await getAuthenticatedClient();
+        const sheets = google.sheets({ version: 'v4', auth: authClient });
+        const fechaRegistroUS = data.fechaRegistro || '';
 
-      // Añadir dependientes
-      if (data.dependents && data.dependents.length > 0) {
-        data.dependents.forEach(dep => {
-          obamacareRows.push([
-            data.operador || '',
-            fechaRegistroUS,
-            data.tipoVenta || '',
-            data.claveSeguridad || '',
-            dep.parentesco || '',
-            dep.nombre || '',
-            dep.apellido || '',
-            '', '', '', '',
-            dep.fechaNacimiento || '',
-            dep.estadoMigratorio || '',
-            dep.ssn || '',
-            '', '', '',
-            dep.aplica || '',
-            '',
-            '',
-            '', '', '', '', '', '',
-            `CLI-${clientId}`
-          ]);
+        // Preparar datos de Obamacare para Sheets
+        const obamacareData = [
+          data.operador || '',
+          fechaRegistroUS,
+          data.tipoVenta || '',
+          data.claveSeguridad || '',
+          'Titular',
+          data.nombre || '',
+          data.apellidos || '',
+          data.sexo || '',
+          data.correo || '',
+          data.telefono || '',
+          data.telefono2 || '',
+          data.fechaNacimiento || '',
+          data.estadoMigratorio || '',
+          data.ssn || '',
+          cleanCurrency(data.ingresos) || '',
+          data.ocupacion || '',
+          data.nacionalidad || '',
+          data.aplica || '',
+          data.cantidadDependientes || '0',
+          data.poBox ? `PO Box: ${data.poBox}` :
+            `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),
+          data.compania || '',
+          data.plan || '',
+          cleanCurrency(data.creditoFiscal) || '',
+          cleanCurrency(data.prima) || '',
+          data.link || '',
+          data.observaciones || '',
+          `CLI-${clientId}`,
+        ];
+
+        let obamacareRows = [obamacareData];
+
+        // Añadir dependientes
+        if (data.dependents && data.dependents.length > 0) {
+          data.dependents.forEach(dep => {
+            obamacareRows.push([
+              data.operador || '',
+              fechaRegistroUS,
+              data.tipoVenta || '',
+              data.claveSeguridad || '',
+              dep.parentesco || '',
+              dep.nombre || '',
+              dep.apellido || '',
+              '', '', '', '',
+              dep.fechaNacimiento || '',
+              dep.estadoMigratorio || '',
+              dep.ssn || '',
+              '', '', '',
+              dep.aplica || '',
+              '',
+              '',
+              '', '', '', '', '', '',
+              `CLI-${clientId}`
+            ]);
+          });
+        }
+
+        // Enviar a Sheets
+        const response = await sheets.spreadsheets.values.append({
+          spreadsheetId: SPREADSHEET_ID,
+          range: `${SHEET_NAME_OBAMACARE}!A1`,
+          valueInputOption: 'USER_ENTERED',
+          insertDataOption: 'INSERT_ROWS',
+          resource: { values: obamacareRows },
         });
-      }
 
-      // Enviar a Sheets
-      await sheets.spreadsheets.values.append({
-        spreadsheetId: SPREADSHEET_ID,
-        range: `${SHEET_NAME_OBAMACARE}!A1`,
-        valueInputOption: 'USER_ENTERED',
-        insertDataOption: 'INSERT_ROWS',
-        resource: { values: obamacareRows },
-      });
-      console.log('✅ Datos guardados en Google Sheets (Obamacare)');
-    } catch (sheetsError) {
-      console.error('⚠️ Error guardando en Google Sheets:', sheetsError.message);
-      // Continuar aunque falle Sheets
+        console.log(`✅ Datos guardados en Google Sheets (Obamacare) - Rango: ${response.data.updates.updatedRange}`);
+        sheetsSuccess = true;
+        break; // Salir del loop si fue exitoso
+
+      } catch (error) {
+        sheetsError = error;
+        console.error(`❌ Error en intento ${attempt}/${MAX_RETRIES} guardando en Google Sheets:`, {
+          message: error.message,
+          code: error.code,
+          status: error.status,
+          details: error.errors || error.response?.data
+        });
+
+        // Si no es el último intento, esperar antes de reintentar
+        if (attempt < MAX_RETRIES) {
+          const waitTime = attempt * 1000; // 1s, 2s, 3s
+          console.log(`⏳ Esperando ${waitTime}ms antes de reintentar...`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+      }
+    }
+
+    // Si falló después de todos los intentos, registrar error crítico
+    if (!sheetsSuccess) {
+      console.error('🚨 ERROR CRÍTICO: No se pudo guardar en Google Sheets después de todos los intentos');
+      console.error('Detalles del error:', sheetsError);
     }
 
     // ========== 3. GUARDAR PAGOS ==========
@@ -560,50 +590,65 @@ app.post('/api/submit-form-data', async (req, res) => {
       await query(pagoQuery, pagoValues);
       console.log('✅ Datos de pago guardados en PostgreSQL');
 
-      // Guardar en Google Sheets también
-      try {
-        const authClient = await getAuthenticatedClient();
-        const sheets = google.sheets({ version: 'v4', auth: authClient });
+      // Guardar en Google Sheets con reintentos
+      let pagosSheetsSuccess = false;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          console.log(`📊 Intento ${attempt}/${MAX_RETRIES} de guardar pagos en Google Sheets...`);
 
-        let pagoData = [
-          `CLI-${clientId}`,
-          `${data.nombre} ${data.apellidos}`,
-          data.telefono || '',
-          data.metodoPago || '',
-        ];
+          const authClient = await getAuthenticatedClient();
+          const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-        const pagosObservaciones = data.pagoObservacionTarjeta || data.observaciones;
+          let pagoData = [
+            `CLI-${clientId}`,
+            `${data.nombre} ${data.apellidos}`,
+            data.telefono || '',
+            data.metodoPago || '',
+          ];
 
-        if (data.metodoPago === "banco" && data.pagoBanco) {
-          pagoData = pagoData.concat([
-            data.pagoBanco.numCuenta || '',
-            data.pagoBanco.numRuta || '',
-            data.pagoBanco.nombreBanco || '',
-            data.pagoBanco.titularCuenta || '',
-            data.pagoBanco.socialCuenta || '',
-            pagosObservaciones || '',
-          ]);
-        } else if (data.metodoPago === 'tarjeta' && data.pagoTarjeta) {
-          pagoData = pagoData.concat([
-            data.pagoTarjeta.numTarjeta || '',
-            data.pagoTarjeta.fechaVencimiento || '',
-            data.pagoTarjeta.titularTarjeta || '',
-            data.pagoTarjeta.cvc || '',
-            '',
-            pagosObservaciones || '',
-          ]);
+          const pagosObservaciones = data.pagoObservacionTarjeta || data.observaciones;
+
+          if (data.metodoPago === "banco" && data.pagoBanco) {
+            pagoData = pagoData.concat([
+              data.pagoBanco.numCuenta || '',
+              data.pagoBanco.numRuta || '',
+              data.pagoBanco.nombreBanco || '',
+              data.pagoBanco.titularCuenta || '',
+              data.pagoBanco.socialCuenta || '',
+              pagosObservaciones || '',
+            ]);
+          } else if (data.metodoPago === 'tarjeta' && data.pagoTarjeta) {
+            pagoData = pagoData.concat([
+              data.pagoTarjeta.numTarjeta || '',
+              data.pagoTarjeta.fechaVencimiento || '',
+              data.pagoTarjeta.titularTarjeta || '',
+              data.pagoTarjeta.cvc || '',
+              '',
+              pagosObservaciones || '',
+            ]);
+          }
+
+          const response = await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME_PAGOS}!A1`,
+            valueInputOption: 'USER_ENTERED',
+            insertDataOption: 'INSERT_ROWS',
+            resource: { values: [pagoData] },
+          });
+
+          console.log(`✅ Datos de pago guardados en Google Sheets - Rango: ${response.data.updates.updatedRange}`);
+          pagosSheetsSuccess = true;
+          break;
+
+        } catch (error) {
+          console.error(`❌ Error en intento ${attempt}/${MAX_RETRIES} guardando pagos en Sheets:`, error.message);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          } else {
+            console.error('🚨 ERROR CRÍTICO: No se pudo guardar pagos en Google Sheets');
+            sheetsSuccess = false; // Marcar que hubo error en Sheets
+          }
         }
-
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `${SHEET_NAME_PAGOS}!A1`,
-          valueInputOption: 'USER_ENTERED',
-          insertDataOption: 'INSERT_ROWS',
-          resource: { values: [pagoData] },
-        });
-        console.log('✅ Datos de pago guardados en Google Sheets');
-      } catch (sheetsError) {
-        console.error('⚠️ Error guardando pagos en Sheets:', sheetsError.message);
       }
     }
 
@@ -641,61 +686,87 @@ app.post('/api/submit-form-data', async (req, res) => {
 
       console.log(`✅ ${data.cignaPlans.length} plan(es) Cigna guardado(s) en PostgreSQL`);
 
-      // Guardar en Google Sheets también
-      try {
-        const authClient = await getAuthenticatedClient();
-        const sheets = google.sheets({ version: 'v4', auth: authClient });
+      // Guardar en Google Sheets con reintentos
+      let cignaSheetsSuccess = false;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          console.log(`📊 Intento ${attempt}/${MAX_RETRIES} de guardar Cigna en Google Sheets...`);
 
-        const cignaValues = data.cignaPlans.map((p) => [
-          `CLI-${clientId}`,
-          new Date().toLocaleDateString('es-ES'),
-          `${data.nombre} ${data.apellidos}`,
-          data.telefono || '',
-          data.sexo || '',
-          data.fechaNacimiento || '',
-          data.poBox ? `PO Box: ${data.poBox}` :
-            `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),
-          data.correo || '',
-          data.estadoMigratorio || '',
-          data.ssn || '',
-          `${p.beneficiarioNombre || ''} / ${p.beneficiarioFechaNacimiento || ''} / ${p.beneficiarioDireccion || ''} / ${p.beneficiarioRelacion || ''}`,
-          p.tipo || '',
-          p.coberturaTipo || '',
-          p.beneficio || '',
-          cleanCurrency(p.beneficioDiario) || '',
-          cleanCurrency(p.deducible) || '',
-          cleanCurrency(p.prima) || '',
-          p.comentarios || '',
-        ]);
+          const authClient = await getAuthenticatedClient();
+          const sheets = google.sheets({ version: 'v4', auth: authClient });
 
-        await sheets.spreadsheets.values.append({
-          spreadsheetId: SPREADSHEET_ID,
-          range: `${SHEET_NAME_CIGNA}!A1`,
-          valueInputOption: 'USER_ENTERED',
-          insertDataOption: 'INSERT_ROWS',
-          resource: { values: cignaValues },
-        });
-        console.log('✅ Datos de Cigna guardados en Google Sheets');
-      } catch (sheetsError) {
-        console.error('⚠️ Error guardando Cigna en Sheets:', sheetsError.message);
+          const cignaValues = data.cignaPlans.map((p) => [
+            `CLI-${clientId}`,
+            new Date().toLocaleDateString('es-ES'),
+            `${data.nombre} ${data.apellidos}`,
+            data.telefono || '',
+            data.sexo || '',
+            data.fechaNacimiento || '',
+            data.poBox ? `PO Box: ${data.poBox}` :
+              `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),
+            data.correo || '',
+            data.estadoMigratorio || '',
+            data.ssn || '',
+            `${p.beneficiarioNombre || ''} / ${p.beneficiarioFechaNacimiento || ''} / ${p.beneficiarioDireccion || ''} / ${p.beneficiarioRelacion || ''}`,
+            p.tipo || '',
+            p.coberturaTipo || '',
+            p.beneficio || '',
+            cleanCurrency(p.beneficioDiario) || '',
+            cleanCurrency(p.deducible) || '',
+            cleanCurrency(p.prima) || '',
+            p.comentarios || '',
+          ]);
+
+          const response = await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${SHEET_NAME_CIGNA}!A1`,
+            valueInputOption: 'USER_ENTERED',
+            insertDataOption: 'INSERT_ROWS',
+            resource: { values: cignaValues },
+          });
+
+          console.log(`✅ Datos de Cigna guardados en Google Sheets - Rango: ${response.data.updates.updatedRange}`);
+          cignaSheetsSuccess = true;
+          break;
+
+        } catch (error) {
+          console.error(`❌ Error en intento ${attempt}/${MAX_RETRIES} guardando Cigna en Sheets:`, error.message);
+          if (attempt < MAX_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+          } else {
+            console.error('🚨 ERROR CRÍTICO: No se pudo guardar Cigna en Google Sheets');
+            sheetsSuccess = false; // Marcar que hubo error en Sheets
+          }
+        }
       }
     }
 
-    return res.status(201).json({
+    // Preparar respuesta con información detallada
+    const responseData = {
       success: true,
       clientId: clientId,
       folderName: folderName,
-      message: 'Formulario procesado exitosamente',
+      message: sheetsSuccess
+        ? 'Formulario procesado y guardado exitosamente en PostgreSQL y Google Sheets'
+        : 'Formulario guardado en PostgreSQL. ADVERTENCIA: Hubo problemas al guardar en Google Sheets',
       stats: {
         dependientes: data.dependents?.length || 0,
         cignaPlans: data.cignaPlans?.length || 0,
         metodoPago: data.metodoPago || 'ninguno',
         savedTo: {
           postgresql: true,
-          googleSheets: sheetsClient !== null
+          googleSheets: sheetsSuccess
         }
       }
-    });
+    };
+
+    // Si hubo error en Sheets, agregar advertencia
+    if (!sheetsSuccess) {
+      responseData.warning = 'Los datos se guardaron en la base de datos pero NO en Google Sheets. Por favor, contacte al administrador.';
+      responseData.sheetsError = sheetsError?.message || 'Error desconocido';
+    }
+
+    return res.status(sheetsSuccess ? 201 : 207).json(responseData); // 207 = Multi-Status (éxito parcial)
 
   } catch (error) {
     console.error('❌ Error en /api/submit-form-data:', error.message);
