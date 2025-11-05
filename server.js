@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
+import multer from 'multer';
+import { Readable } from 'stream';
 import { google } from 'googleapis';
 import { query } from './db.js';
 import draftRoutes from './routes/draftRoutes.js';
@@ -11,38 +13,66 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==================== CONFIGURACIÓN GOOGLE SHEETS ====================
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
+// ==================== CONFIGURACIÓN MULTER ====================
+const storage = multer.memoryStorage();
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB
+  }
+});
+
+// ==================== CONFIGURACIÓN GOOGLE ====================
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID;
 const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
 
-// Configurar autenticación con Service Account
+// Variables globales para los clientes de Google
 let sheetsClient = null;
+let driveClient = null;
+let authClient = null;
 
-async function initGoogleSheets() {
+// ==================== AUTENTICACIÓN GOOGLE ====================
+async function getAuthenticatedClient() {
+  if (authClient) {
+    return authClient;
+  }
+
   try {
-    const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_KEY 
-      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
+    const credentials = process.env.GOOGLE_APPLICATION_CREDENTIALS
+      ? JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS)
       : null;
 
     if (!credentials) {
-      console.warn('⚠️ No se encontraron credenciales de Google. Sheets deshabilitado.');
-      return null;
+      throw new Error('No se encontraron credenciales de Google Service Account');
     }
 
     const auth = new google.auth.GoogleAuth({
       credentials: credentials,
       scopes: [
         'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive.file'
+        'https://www.googleapis.com/auth/drive.file',
+        'https://www.googleapis.com/auth/drive'
       ],
     });
 
-    const authClient = await auth.getClient();
-    sheetsClient = google.sheets({ version: 'v4', auth: authClient });
-    
-    console.log('✅ Google Sheets API inicializada correctamente');
+    authClient = await auth.getClient();
+    console.log('✅ Cliente de autenticación Google creado');
+    return authClient;
+  } catch (error) {
+    console.error('❌ Error creando cliente de autenticación:', error.message);
+    throw error;
+  }
+}
+
+// Inicializar Google Sheets
+async function initGoogleSheets() {
+  try {
+    const auth = await getAuthenticatedClient();
+    sheetsClient = google.sheets({ version: 'v4', auth: auth });
+    console.log('✅ Google Sheets API inicializada');
     return sheetsClient;
   } catch (error) {
     console.error('❌ Error inicializando Google Sheets:', error.message);
@@ -50,8 +80,24 @@ async function initGoogleSheets() {
   }
 }
 
+// Inicializar Google Drive
+async function initGoogleDrive() {
+  try {
+    const auth = await getAuthenticatedClient();
+    driveClient = google.drive({ version: 'v3', auth: auth });
+    console.log('✅ Google Drive API inicializada');
+    return driveClient;
+  } catch (error) {
+    console.error('❌ Error inicializando Google Drive:', error.message);
+    return null;
+  }
+}
+
 // Inicializar al arrancar
-initGoogleSheets();
+(async () => {
+  await initGoogleSheets();
+  await initGoogleDrive();
+})();
 
 // Función para agregar datos a Google Sheets
 async function appendToSheet(sheetName, values) {
@@ -70,7 +116,7 @@ async function appendToSheet(sheetName, values) {
       }
     });
 
-    console.log(`✅ Datos agregados a ${sheetName}:`, response.data.updates);
+    console.log(`✅ Datos agregados a ${sheetName}`);
     return response.data;
   } catch (error) {
     console.error(`❌ Error agregando a ${sheetName}:`, error.message);
@@ -101,7 +147,8 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     services: {
       postgresql: true,
-      googleSheets: sheetsClient !== null
+      googleSheets: sheetsClient !== null,
+      googleDrive: driveClient !== null
     }
   });
 });
@@ -122,13 +169,9 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    const userQuery = `
-      SELECT id, nombre, email, password, rol 
-      FROM usuarios 
-      WHERE email = $1
-    `;
-    
-    const users = await query(userQuery, [email]);
+    // Buscar usuario por email
+    const sql = 'SELECT id, nombre, email, password, rol FROM usuarios WHERE email = $1';
+    const users = await query(sql, [email]);
 
     if (users.length === 0) {
       console.log(`❌ Usuario no encontrado: ${email}`);
@@ -139,12 +182,15 @@ app.post('/api/login', async (req, res) => {
 
     const user = users[0];
 
+    // Verificar si la contraseña es un hash de bcrypt
     const isHashedPassword = user.password && user.password.startsWith('$2');
     let passwordValid = false;
 
     if (isHashedPassword) {
+      // Comparar con bcrypt
       passwordValid = await bcrypt.compare(password, user.password);
     } else {
+      // Comparación directa (para contraseñas sin hashear)
       passwordValid = user.password === password;
     }
 
@@ -157,10 +203,12 @@ app.post('/api/login', async (req, res) => {
 
     console.log(`✅ Login exitoso: ${user.nombre} (${user.rol})`);
 
+    // Generar token
     const token = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
 
     return res.json({
       success: true,
+      message: 'Autenticación exitosa',
       token: token,
       user: {
         id: user.id,
@@ -174,7 +222,148 @@ app.post('/api/login', async (req, res) => {
     console.error('❌ Error en /api/login:', error);
     console.error('Stack:', error.stack);
     return res.status(500).json({ 
-      error: 'Error interno del servidor',
+      error: 'Error interno del servidor al intentar iniciar sesión',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ==================== ENDPOINT: CREAR CARPETA EN DRIVE ====================
+app.post('/api/create-folder', async (req, res) => {
+  console.log('📁 Solicitud para crear carpeta:', req.body);
+  
+  try {
+    const { folderName } = req.body;
+    
+    if (!folderName) {
+      return res.status(400).json({ 
+        error: 'El nombre de la carpeta es requerido' 
+      });
+    }
+
+    if (!driveClient) {
+      // Intentar inicializar si no está disponible
+      await initGoogleDrive();
+      
+      if (!driveClient) {
+        return res.status(503).json({ 
+          error: 'Google Drive no está disponible en este momento' 
+        });
+      }
+    }
+
+    const folderMetadata = {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: [DRIVE_FOLDER_ID]
+    };
+
+    const response = await driveClient.files.create({
+      resource: folderMetadata,
+      fields: 'id, webViewLink',
+      supportsAllDrives: true 
+    });
+
+    const folderId = response.data.id;
+    const folderLink = response.data.webViewLink || `https://drive.google.com/drive/folders/${folderId}`;
+
+    console.log(`✅ Carpeta creada: ${folderName} (ID: ${folderId})`);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Carpeta creada exitosamente',
+      folderId: folderId,
+      folderLink: folderLink
+    });
+
+  } catch (error) {
+    console.error('❌ Error creando carpeta:', error);
+    return res.status(500).json({ 
+      error: 'Error al crear la carpeta',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// ==================== ENDPOINT: SUBIR ARCHIVOS A DRIVE ====================
+app.post('/api/upload-files', upload.array('files'), async (req, res) => {
+  console.log('📤 Solicitud para subir archivos');
+  
+  try {
+    const { folderId, folderLink, nombre, apellidos, telefono } = req.body;
+    
+    if (!folderId && !folderLink) {
+      return res.status(400).json({ 
+        error: 'Se requiere folderId o folderLink' 
+      });
+    }
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ 
+        error: 'No se recibieron archivos para subir' 
+      });
+    }
+
+    if (!driveClient) {
+      await initGoogleDrive();
+      
+      if (!driveClient) {
+        return res.status(503).json({ 
+          error: 'Google Drive no está disponible' 
+        });
+      }
+    }
+
+    console.log(`📁 Subiendo ${req.files.length} archivo(s) a carpeta: ${folderId}`);
+
+    const uploadedFileLinks = [];
+
+    for (const file of req.files) {
+      console.log(`📄 Subiendo: ${file.originalname} (${(file.size / 1024).toFixed(2)} KB)`);
+      
+      const fileMetadata = {
+        name: file.originalname,
+        parents: [folderId]
+      };
+
+      const media = {
+        mimeType: file.mimetype,
+        body: Readable.from(file.buffer)
+      };
+
+      const response = await driveClient.files.create({
+        resource: fileMetadata,
+        media: media,
+        fields: 'id, webViewLink',
+        supportsAllDrives: true
+      });
+
+      uploadedFileLinks.push({
+        name: file.originalname,
+        id: response.data.id,
+        link: response.data.webViewLink
+      });
+
+      console.log(`✅ Archivo subido: ${file.originalname}`);
+    }
+
+    const finalFolderLink = folderLink || `https://drive.google.com/drive/folders/${folderId}`;
+
+    return res.status(200).json({
+      success: true,
+      message: 'Archivos subidos exitosamente',
+      fileLinks: uploadedFileLinks,
+      folderLink: finalFolderLink,
+      stats: {
+        uploaded: uploadedFileLinks.length,
+        total: req.files.length
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error subiendo archivos:', error);
+    return res.status(500).json({ 
+      error: 'Error al subir archivos',
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
@@ -259,7 +448,6 @@ app.post('/api/submit-form-data', async (req, res) => {
     // ========== 2. GUARDAR EN GOOGLE SHEETS ==========
     if (sheetsClient) {
       try {
-        // Preparar fila para Obamacare
         const obamacareRow = [
           data.fechaRegistro || '',
           data.nombre || '',
@@ -297,7 +485,7 @@ app.post('/api/submit-form-data', async (req, res) => {
         await appendToSheet(SHEET_NAME_OBAMACARE, obamacareRow);
         console.log('✅ Datos guardados en Google Sheets (Obamacare)');
       } catch (sheetsError) {
-        console.error('⚠️ Error guardando en Sheets (continuando):', sheetsError.message);
+        console.error('⚠️ Error guardando en Sheets:', sheetsError.message);
       }
     }
 
@@ -305,7 +493,6 @@ app.post('/api/submit-form-data', async (req, res) => {
     if (data.metodoPago) {
       console.log(`💳 Guardando método de pago: ${data.metodoPago}`);
       
-      // PostgreSQL
       const pagoQuery = `
         INSERT INTO pagos (
           client_id, metodo_pago, num_cuenta, num_ruta, nombre_banco,
@@ -332,7 +519,6 @@ app.post('/api/submit-form-data', async (req, res) => {
       await query(pagoQuery, pagoValues);
       console.log('✅ Datos de pago guardados en PostgreSQL');
 
-      // Google Sheets
       if (sheetsClient) {
         try {
           const pagoRow = [
@@ -374,7 +560,6 @@ app.post('/api/submit-form-data', async (req, res) => {
       `;
 
       for (const plan of data.cignaPlans) {
-        // PostgreSQL
         const cignaValues = [
           clientId,
           plan.tipo || null,
@@ -392,7 +577,6 @@ app.post('/api/submit-form-data', async (req, res) => {
 
         await query(cignaQuery, cignaValues);
 
-        // Google Sheets
         if (sheetsClient) {
           try {
             const cignaRow = [
@@ -449,6 +633,45 @@ app.post('/api/submit-form-data', async (req, res) => {
   }
 });
 
+// ==================== ENDPOINT: OBTENER POLÍTICAS (ADMIN) ====================
+app.get('/api/policies', async (req, res) => {
+  try {
+    console.log('📊 Obteniendo listado de pólizas...');
+
+    const policiesQuery = `
+      SELECT 
+        id as client_id,
+        fecha_registro,
+        nombre || ' ' || apellidos as nombre_completo,
+        operador,
+        compania,
+        prima,
+        telefono,
+        correo,
+        dependents as dependents_json,
+        cantidad_dependientes
+      FROM polizas
+      ORDER BY fecha_registro DESC
+      LIMIT 1000
+    `;
+
+    const policies = await query(policiesQuery);
+
+    return res.json({
+      success: true,
+      data: policies,
+      count: policies.length
+    });
+
+  } catch (error) {
+    console.error('❌ Error obteniendo pólizas:', error);
+    return res.status(500).json({
+      error: 'Error obteniendo pólizas',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
 // ==================== MANEJO DE ERRORES 404 ====================
 app.use((req, res) => {
   res.status(404).json({ 
@@ -476,6 +699,7 @@ app.listen(PORT, () => {
 ║   🌍 Entorno: ${process.env.NODE_ENV || 'development'}     ║
 ║   📊 PostgreSQL: ✅                     ║
 ║   📈 Google Sheets: ${sheetsClient ? '✅' : '❌'}            ║
+║   📁 Google Drive: ${driveClient ? '✅' : '❌'}             ║
 ║   ⏰ ${new Date().toLocaleString('es-ES')} ║
 ╚════════════════════════════════════════╝
   `);
