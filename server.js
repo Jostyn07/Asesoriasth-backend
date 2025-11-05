@@ -1,515 +1,313 @@
-// server.js (VERSION CORREGIDA para ES Modules y Render)
-
-// === 1. IMPORTS Y CONFIGURACIÓN ===
-// Usamos 'import' para todo ya que 'type': 'module' está en package.json
+import express from 'express';
+import cors from 'cors';
+import bcrypt from 'bcrypt';
+import { query } from './db.js';
+import draftRoutes from './routes/draftRoutes.js';
 import dotenv from 'dotenv';
+
 dotenv.config();
 
-import { Readable } from 'stream'; 
-import express from 'express';
-import { google } from 'googleapis';
-import multer from 'multer';
-import cors from 'cors'; 
-import bcrypt from 'bcrypt'; 
-// Importamos la función de query para PostgreSQL
-import { query } from './db.js';
-import { version } from 'os';
-
-// === 2. CONSTANTES ===
-const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
-const SHEET_NAME_OBAMACARE = "Pólizas";
-const SHEET_NAME_CIGNA = "Cigna Complementario";
-const SHEET_NAME_PAGOS = "Pagos";
-const SHEET_NAME_DRAFTS = "Borrador";
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID; // Se lee del entorno
-
-// === 3. HELPERS ===
-
-/**
- * Obtiene un cliente autenticado usando las credenciales de Service Account 
- * almacenadas en la variable de entorno GOOGLE_APPLICATION_CREDENTIALS de Render.
- */
-async function getAuthenticatedClient() {
-// CRÍTICO: 1. Verifica si la variable de entorno existe y 2. Parsea el JSON.
-    const credentialsString = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
-    if (!credentialsString || credentialsString === 'undefined' || credentialsString.trim() === '') {
-        console.error('❌ CRÍTICO: La variable GOOGLE_APPLICATION_CREDENTIALS no está configurada o está vacía.');
-        // Lanza un error claro que será capturado por los endpoints
-        throw new Error('No se pudieron cargar las credenciales del servicio de Google. Por favor, revisa la variable GOOGLE_SA_CREDENTIALS en Render.');
-    }
-
-    let credentials;
-    try {
-        credentials = JSON.parse(credentialsString); // Intentamos parsear el JSON
-    } catch (e) {
-        console.error('❌ CRÍTICO: Error al parsear GOOGLE_APPLICATION_CREDENTIALS como JSON:', e.message);
-        throw new Error('Las credenciales de Google no son un JSON válido.');
-    }
-    
-    // Si llegamos aquí, las credenciales son válidas
-    const authClient = new google.auth.GoogleAuth ({
-        credentials, // Usamos las credenciales JSON del entorno
-        scopes: [
-            'https://www.googleapis.com/auth/drive',
-            'https://www.googleapis.com/auth/spreadsheets'
-        ]
-    });
-    return await authClient.getClient();
-}
-
-// Helper para limpiar formato de moneda
-function cleanCurrency(value) {
-    if (typeof value !== 'string') return value;
-    return value.replace(/[$,]/g, '').trim(); 
-}
-
-// === 4. CONFIGURACIÓN DE EXPRESS ===
 const app = express();
-const upload = multer();
+const PORT = process.env.PORT || 3000;
 
-// CRÍTICO: CORS actualizado para permitir solicitudes desde el Frontend
-const allowedOrigins = [
-    "https://asesoriasth.com", 
-    "http://127.0.0.1:5500", 
-    "https://asesoriasth.com/formulario.html", 
-    "https://jostyn07.github.io", // Raíz de tu GitHub Pages
-    "https://jostyn07.github.io/Asesoriasth-", // Ruta del proyecto en GitHub Pages
-    "https://asesoriasth-backend-der.onrender.com" // Tu propio dominio de Render
-];
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Permitir peticiones sin 'Origin' (como peticiones de servidor a servidor)
-        if (!origin || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            callback(new Error(`No autorizado por CORS. Origen: ${origin}`));
-        }
-    },
-    credentials: true,
-};
-app.use(cors(corsOptions));
-app.use(express.json());
+// Middlewares
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Logging middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  next();
+});
 
-// === 5. ENDPOINT DE LOGIN ===
-app.post('/api/login', async (req, res) => { // CORREGIDO: async.post a app.post
+// Health check
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Backend de Asesorías S&S funcionando correctamente',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Rutas de borradores
+app.use('/api/drafts', draftRoutes);
+
+// ==================== ENDPOINT: LOGIN ====================
+app.post('/api/login', async (req, res) => {
+  try {
     const { email, password } = req.body;
-    console.log(`Intento de login para: ${email}`);
+
+    console.log(`🔐 Intento de login para: ${email}`);
 
     if (!email || !password) {
-        return res.status(400).json({ error: 'Faltan credenciales (correo y contraseña).' });
+      return res.status(400).json({ 
+        error: 'Email y contraseña son requeridos' 
+      });
     }
 
-    try {
-        // 1. Buscar usuario por email
-        const sql = 'SELECT id, nombre, email, password, rol FROM users WHERE email = $1';
-        const values = [email];
-        // CORREGIDO: Se usa `query` para obtener `users`
-        const users = await query(sql, values);
+    // Consultar usuario en la base de datos
+    const userQuery = `
+      SELECT id, nombre, email, password, rol 
+      FROM usuarios 
+      WHERE email = $1
+    `;
+    
+    const users = await query(userQuery, [email]);
 
-        if (users.length === 1) {
-            const user = users[0];
-            
-            // 2. Comparar la contraseña con el hash guardado (BCRYPT)
-            const match = await bcrypt.compare(password, user.password); // Asumimos que bcrypt está instalado
-            
-            if (match) {
-                console.log(`✅ Usuario autenticado: ${user.nombre}`);
-                const token = `local_auth_token_${user.id}`; 
-
-                return res.status(200).json({
-                    message: 'Autenticación exitosa',
-                    token: token,
-                    user: {
-                        id: user.id,
-                        name: user.nombre,
-                        email: user.email
-                    }
-                });
-            } else {
-                console.error(`❌ Contraseña incorrecta para ${email}`);
-                return res.status(401).json({ error: 'Credenciales inválidas'});  
-            }
-        } else {
-            console.error(`❌ Usuario no encontrado: ${email}`);
-            return res.status(401).json({ error: 'Credenciales inválidas'});  
-        }
-    } catch (error) {
-        console.error('❌ Error en la consulta de login:', error);
-        return res.status(500).json({ error: 'Error interno del servidor al intentar iniciar sesión' });
-    }
-});
-
-
-// === 6. ENDPOINT DE UPLOAD DE ARCHIVOS ===
-// La lógica aquí parece correcta, asumiendo que el Service Account tiene permisos
-app.post('/api/upload-files', upload.array('files'), async (req, res) => {
-    // ... (El código de upload.array('files') parece mayormente correcto, se mantiene)
-    try {
-        const { folderId, folderLink, nombre, apellidos, telefono} = req.body;
-        if (!folderId) {
-          return res.status(400).json({ error: 'El ID de la carpeta es requerido.' });
-        }
-
-        const authClient = await getAuthenticatedClient();
-        const drive = google.drive({ version: 'v3', auth: authClient });
-
-        const uploadedFileLinks = [];
-        if (req.files && req.files.length > 0) {
-            for (const file of req.files) {
-                const fileMetadata = {
-                    name: file.originalname,
-                    parents: [folderId]
-                };
-                const media = {
-                    mimeType: file.mimetype,
-                    body: Readable.from(file.buffer)
-                };
-                const response = await drive.files.create({
-                    resource: fileMetadata,
-                    media: media,
-                    fields: 'id, webViewLink',
-                    supportsAllDrives: true
-                });
-                res.status(201).send({
-                    message: 'Carpeta creada exitosamente',
-                    folderId: response.data.id,
-                    folderLink: response.data.webViewLink,
-                })
-                uploadedFileLinks.push(response.data.webViewLink);
-            }
-        }
-
-        res.status(200).json({
-            message: 'Archivos subidos exitosamente',
-            fileLinks: uploadedFileLinks
-        });
-    } catch (error) {
-        console.error('Error al subir archivos:', error);
-        res.status(500).json({ error: 'Error al subir archivos' });
-    }
-});
-
-
-// === 7. ENDPOINT PARA CREAR CARPETA ===
-app.post('/api/create-folder', async (req, res) => {
-  // ... (El código de create-folder es correcto, se mantiene)
-  console.log('Solicitud recibida para crear carpeta:', req.body);
-  try {
-    const folderName = req.body.folderName;
-    if (!folderName) {
-      return res.status(400).send('El nombre de la carpeta es requerido.');
+    if (users.length === 0) {
+      console.log(`❌ Usuario no encontrado: ${email}`);
+      return res.status(401).json({ 
+        error: 'Credenciales inválidas' 
+      });
     }
 
-    const authClient = await getAuthenticatedClient();
-    const drive = google.drive({ version: 'v3', auth: authClient });
+    const user = users[0];
 
-    const folderMetadata = {
-      name: folderName,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [DRIVE_FOLDER_ID]
-    };
+    // Verificar si la contraseña almacenada es un hash de bcrypt
+    const isHashedPassword = user.password && user.password.startsWith('$2');
 
-    const response = await drive.files.create({
-      resource: folderMetadata,
-      fields: 'id',
-      supportsAllDrives: true 
-    });
+    let passwordValid = false;
 
-    console.log('Carpeta creada con ID:', response.data.id);
-    res.status(201).send({
-      message: 'Carpeta creada exitosamente',
-      folderId: response.data.id,
+    if (isHashedPassword) {
+      // Comparar con bcrypt si es un hash
+      passwordValid = await bcrypt.compare(password, user.password);
+    } else {
+      // Comparación directa para contraseñas no hasheadas (temporal)
+      passwordValid = user.password === password;
+    }
+
+    if (!passwordValid) {
+      console.log(`❌ Contraseña incorrecta para: ${email}`);
+      return res.status(401).json({ 
+        error: 'Credenciales inválidas' 
+      });
+    }
+
+    console.log(`✅ Login exitoso: ${user.nombre} (${user.rol})`);
+
+    // Generar token simple (en producción usa JWT)
+    const token = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
+
+    return res.json({
+      success: true,
+      token: token,
+      user: {
+        id: user.id,
+        name: user.nombre,
+        email: user.email,
+        rol: user.rol
+      }
     });
 
   } catch (error) {
-    console.error('Error al crear la carpeta:', error.errors || error.message || error);
-    res.status(500).send('Error interno del servidor');
+    console.error('❌ Error en /api/login:', error);
+    console.error('Stack:', error.stack);
+    return res.status(500).json({ 
+      error: 'Error interno del servidor',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
-
-// === 8. ENDPOINT DE SUBMIT FORM DATA (GOOGLE SHEETS) ===
+// ==================== ENDPOINT: SUBMIT FORM DATA ====================
 app.post('/api/submit-form-data', async (req, res) => {
-    try {
-        const data = req.body;
+  try {
+    console.log('📥 Recibiendo datos del formulario...');
+    const data = req.body;
 
-        const authClient = await getAuthenticatedClient();
-        const sheets = google.sheets({ version: 'v4', auth: authClient });
-
-        const clientId = `CLI-${Date.now()}-${Math.random().toString(36).slice(2,8).toUpperCase()}` // CORREGIDO: slice.slice a slice
-        const fechaRegistroUS = data.fechaRegistro || ''; // CORREGIDO: fechaRegisto a fechaRegistro
-
-        // Preparar y enviar datos de Obamacare y dependientes
-        const obamacareData = [
-            data.operador || '',
-            fechaRegistroUS,
-            data.tipoVenta || '',
-            data.claveSeguridad || '', // CORREGIDO: claveSeguidad a claveSeguridad
-            'Titular',
-            data.nombre || '',
-            data.apellidos || '',
-            data.sexo || '',
-            data.correo || '',
-            data.telefono || '',
-            data.telefono2 || '',
-            data.fechaNacimiento || '',
-            data.estadoMigratorio || '',
-            data.ssn || '',
-            cleanCurrency(data.ingresos) || '',
-            data.ocupación || '',
-            data.nacionalidad || '',
-            data.aplica || '',
-            data.cantidadDependientes || '0',
-            // Dirección completa
-            data.poBox ? `PO Box: ${data.poBox}` :
-                `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),            
-            data.compania || '',
-            data.plan || '',
-            cleanCurrency(data.creditoFiscal) || '',
-            cleanCurrency(data.prima) || '',
-            data.link || '',
-            data.observaciones || '' , // CORREGIDO: observacion a observaciones
-            clientId,
-            data.folderLink || ''
-        ];
-        
-        let obamacareRows = [obamacareData];
-
-        // Añadir dependientes
-        if (data.dependents && data.dependents.length > 0) {
-        data.dependents.forEach(dep => {
-            obamacareRows.push([
-                data.operador || '', // 1
-                fechaRegistroUS, // 2
-                data.tipoVenta || '', // 3
-                data.claveSeguridad || '', // 4
-                dep.parentesco || '', // 5
-                dep.nombre || '', // 6
-                dep.apellido || '', // 7
-                '', // Sexo 8
-                '', // Correo 9
-                '', // Teléfono 10
-                '', // Telefono 2 (11)
-                dep.fechaNacimiento || '', // (12)
-                dep.estadoMigratorio || '', // 13
-                dep.ssn || '', // 14
-                '', // Ingresos 15
-                '', // Ocupación 16
-                '', // Nacionalidad 17
-                dep.aplica || '', // 18
-                '', // Cantidad de dependientes 19
-                '', // Dirección completa (vacío para dependientes) 20
-                '', // Compañia 21
-                '', // Plan 22
-                '', // Credito fiscal 23
-                '', // Prima 24
-                '', // Link 25
-                '', // Observación 26
-                clientId, // 27
-                '' //Vacio 28
-            ]);
-        });
-        }
-
-        // Ejecutar insercion en Sheets
-        const obamacareSheetResponse = await sheets.spreadsheets.values.append({ // CORREGIDO: spreadsheet a spreadsheets
-            spreadsheetId: SPREADSHEET_ID,
-            range: `${SHEET_NAME_OBAMACARE}!A1`,
-            valueInputOption: 'USER_ENTERED',
-            insertDataOption: 'INSERT_ROWS', // CORREGIDO: insetDataOption a insertDataOption
-            resource: {
-                values: obamacareRows,
-            },
-        });
-        console.log(`Datos de Obamacare y dependientes guardados en Sheets, fila(s) ${obamacareSheetResponse.data.updates.updatedRange}`); // CORREGIDO: updateRange a updatedRange
-        
-        // Preparar y enviar datos de cigna
-        if (data.cignaPlans &&  data.cignaPlans.length > 0) {
-            const cignaValues = data.cignaPlans.map((p) => [
-                clientId,
-                new Date().toLocaleDateString('es-ES'), // CORREGIDO: newDate a new Date()
-                `${data.nombre} ${data.apellidos}`, // CORREGIDO: apellido a apellidos
-                data.telefono || '',
-                data.sexo || '',
-                p.fechaNacimiento || '',
-                data.poBox ? `PO Box: ${data.poBox}` : // CORREGIDO: p.data.poBox a data.poBox
-                    `${data.direccion || ''}, ${data.casaApartamento || ''}, ${data.condado || ''}, ${data.ciudad || ''}, ${data.estado || ''}, ${data.codigoPostal || ''}`.replace(/,\s*,/g, ', ').replace(/,\s*$/, '').trim(),            
-                data.correo || '',
-                data.estadoMigratorio || '',
-                data.ssn || '',
-                `${p.beneficiarioNombre || ''} / ${p.beneficiarioFechaNacimiento || ''} / ${p.beneficiarioDireccion || ''} / ${p.beneficiarioRelacion || ''}`,
-                p.tipo || '',
-                p.coberturaTipo || '',
-                p.beneficio || '',
-                cleanCurrency(p.beneficioDiario) || '',
-                cleanCurrency(p.deducible) || '',
-                cleanCurrency(p.prima) || '',
-                p.comentarios || '',
-            ]);
-
-            await sheets.spreadsheets.values.append({
-                spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME_CIGNA}!A1`, // CORREGIDO: faltaba el '!'
-                valueInputOption: 'USER_ENTERED',
-                insertDataOption: 'INSERT_ROWS',
-                resource: {
-                    values: cignaValues,
-                },
-            });
-            console.log("Datos de cigna guardados exitosamente.")
-
-        }
-
-        // Seccion de pagos
-        if (data.metodoPago) {
-            let pagoData = [
-                clientId,
-                `${data.nombre} ${data.apellidos}`, // CORREGIDO: apellido a apellidos
-                data.telefono || '',
-                data.metodoPago || '',
-            ];
-
-            const pagosObservaciones = data.pagoObservaciones || data.observaciones;
-
-            if (data.metodoPago === "banco" && data.pagoBanco) {
-                pagoData = pagoData.concat([
-                    data.pagoBanco.numCuenta || '',
-                    data.pagoBanco.numRuta || '',
-                    data.pagoBanco.nombreBanco || '',
-                    data.pagoBanco.titularCuenta || '',
-                    data.pagoBanco.socialCuenta || '',
-                    pagosObservaciones || '', // CORREGIDO: pdata.pagoBanco.pagosObservaciones a pagosObservaciones
-                ])
-            } else if (data.metodoPago === 'tarjeta' && data.pagoTarjeta) {
-                pagoData = pagoData.concat([
-                    data.pagoTarjeta.numTarjeta || '',
-                    data.pagoTarjeta.fechaVencimiento || '',
-                    data.pagoTarjeta.titularTarjeta || '',
-                    data.pagoTarjeta.cvc || '',
-                    '',
-                    pagosObservaciones || '',
-                ])
-            }
-            await sheets.spreadsheets.values.append({ // CORREGIDO: spreadsheet.value a spreadsheets.values
-                spreadsheetId: SPREADSHEET_ID,
-                range: `${SHEET_NAME_PAGOS}!A1`,
-                valueInputOption: 'USER_ENTERED',
-                insertDataOption: 'INSERT_ROWS',
-                resource: { // CORREGIDO: resources a resource
-                    values: [pagoData],
-                },
-            });
-            console.log("Datos de pago guardados exitosamente")
-        }
-
-        res.status(200).json({
-            message: 'Datos del formulario enviados exitosamente',
-            clientId: clientId,
-            folderName: `${data.nombre} ${data.apellidos} ${data.telefono}`.trim()
-        });
-
-    } catch (error) {
-        console.error('Error al enviar el formulario:', error.errors || error.message || error);
-        res.status(500).json({ error: 'Error interno al enviar el formulario a sheets'});
+    // Validación básica
+    if (!data.nombre || !data.apellidos) {
+      return res.status(400).json({ 
+        error: 'Los campos "nombre" y "apellidos" son obligatorios' 
+      });
     }
-})
 
-app.post('/api/drafts/save', async (req, res) => {
-    try {
-        const data = req.body;
-        const authClient = await getAuthenticatedClient();
-        const sheets = google.sheets({ version: 'v4', auth: authClient });
+    const folderName = `${data.nombre} ${data.apellidos}`;
+    console.log(`📋 Procesando cliente: ${folderName}`);
 
-        if (!data.draftId) {
-             return res.status(400).json({ error: 'El draftId es obligatorio para guardar el borrador.' });
-        }
-        
-        // 1. Preparar la fila de datos del borrador
-        // NOTA: Debes asegurarte de que estas columnas coincidan con tu hoja "Borrador"
-        const borradorData = [
-            data.draftId || '',                 // A: DRAFT_ID
-            new Date(data.draftTimestamp).toLocaleString('es-ES'), // B: TIMESTAMP_GUARDADO
-            data.nombre || '',                 // C: Nombre
-            data.apellidos || '',              // D: Apellido
-            data.telefono || '',               // E: Teléfono
-            data.correo || '',                 // F: Correo
-            data.operador || '',               // G: Operador
-            data.compania || '',               // H: Compañía
-            data.plan || '',                   // I: Plan
-            data.estadoMigratorio || '',       // J: Estado migratorio
-            data.cantidadDependientes || '0',  // K: Cant. dependientes declarada
-            (data.dependents?.length || 0).toString(), // L: Can. dependientes real (usamos el real)
-            (data.cignaPlans?.length || 0).toString(), // M: Cant. planes cigna
-            data.metodoPago || '',             // N: Método de pago
-            // Columnas calculadas que deben implementarse en el frontend (formulario.js):
-            // Usamos placeholders para evitar fallos de rango.
-            'N/A',                             // O: %Completado
-            'N/A',                             // P: Secciones completadas
-            data.observaciones || '',          // Q: Observaciones (usa 'observaciones' del formulario)
-            // Datos críticos para la restauración:
-            JSON.stringify(data, null, 0),     // R: JSON_COMPLETO
-            'Activo',                          // S: Estado
-            ''
+    // 1. Insertar datos principales en pólizas (Obamacare)
+    const obamacareQuery = `
+      INSERT INTO polizas (
+        fecha_registro, nombre, apellidos, sexo, correo, telefono, telefono2,
+        fecha_nacimiento, estado_migratorio, ssn, ingresos, ocupacion,
+        nacionalidad, aplica, cantidad_dependientes, direccion, casa_apartamento,
+        condado, ciudad, estado, codigo_postal, po_box, compania, plan,
+        credito_fiscal, prima, link, tipo_venta, operador, clave_seguridad,
+        observaciones, dependents
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+        $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
+        $29, $30, $31, $32::jsonb
+      )
+      RETURNING id
+    `;
+
+    const obamacareValues = [
+      data.fechaRegistro || null,
+      data.nombre,
+      data.apellidos,
+      data.sexo || null,
+      data.correo || null,
+      data.telefono || null,
+      data.telefono2 || null,
+      data.fechaNacimiento || null,
+      data.estadoMigratorio || null,
+      data.ssn || null,
+      data.ingresos || null,
+      data.ocupacion || null,
+      data.nacionalidad || null,
+      data.aplica || null,
+      parseInt(data.cantidadDependientes || 0),
+      data.direccion || null,
+      data.casaApartamento || null,
+      data.condado || null,
+      data.ciudad || null,
+      data.estado || null,
+      data.codigoPostal || null,
+      data.poBox || null,
+      data.compania || null,
+      data.plan || null,
+      data.creditoFiscal || null,
+      data.prima || null,
+      data.link || null,
+      data.tipoVenta || null,
+      data.operador || null,
+      data.claveSeguridad || null,
+      data.observaciones || null,
+      JSON.stringify(data.dependents || [])
+    ];
+
+    const obamacareResult = await query(obamacareQuery, obamacareValues);
+    const clientId = obamacareResult[0]?.id;
+
+    if (!clientId) {
+      throw new Error('No se pudo obtener el ID del cliente insertado');
+    }
+
+    console.log(`✅ Cliente guardado con ID: ${clientId}`);
+
+    // 2. Insertar datos de pago si existen
+    if (data.metodoPago) {
+      console.log(`💳 Guardando método de pago: ${data.metodoPago}`);
+      
+      const pagoQuery = `
+        INSERT INTO pagos (
+          client_id, metodo_pago, num_cuenta, num_ruta, nombre_banco,
+          titular_cuenta, social_cuenta, num_tarjeta, fecha_vencimiento,
+          cvc, titular_tarjeta, observaciones
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `;
+
+      const pagoValues = [
+        clientId,
+        data.metodoPago,
+        data.pagoBanco?.numCuenta || null,
+        data.pagoBanco?.numRuta || null,
+        data.pagoBanco?.nombreBanco || null,
+        data.pagoBanco?.titularCuenta || null,
+        data.pagoBanco?.socialCuenta || null,
+        data.pagoTarjeta?.numTarjeta || null,
+        data.pagoTarjeta?.fechaVencimiento || null,
+        data.pagoTarjeta?.cvc || null,
+        data.pagoTarjeta?.titularTarjeta || null,
+        data.pagoObservacionTarjeta || null
+      ];
+
+      await query(pagoQuery, pagoValues);
+      console.log('✅ Datos de pago guardados');
+    }
+
+    // 3. Insertar planes Cigna si existen
+    if (data.cignaPlans && Array.isArray(data.cignaPlans) && data.cignaPlans.length > 0) {
+      console.log(`🏥 Guardando ${data.cignaPlans.length} plan(es) Cigna`);
+      
+      const cignaQuery = `
+        INSERT INTO cigna_complementario (
+          client_id, plan_tipo, cobertura_tipo, beneficio, deducible,
+          prima, comentarios, beneficio_diario, beneficiario_nombre,
+          beneficiario_fecha_nacimiento, beneficiario_direccion,
+          beneficiario_relacion
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `;
+
+      for (const plan of data.cignaPlans) {
+        const cignaValues = [
+          clientId,
+          plan.tipo || null,
+          plan.coberturaTipo || null,
+          plan.beneficio || null,
+          plan.deducible || null,
+          plan.prima || null,
+          plan.comentarios || null,
+          plan.beneficioDiario || null,
+          plan.beneficiarioNombre || null,
+          plan.beneficiarioFechaNacimiento || null,
+          plan.beneficiarioDireccion || null,
+          plan.beneficiarioRelacion || null
         ];
 
-        // 2. Intentar buscar el borrador existente (Por draftId)
-        let rowIndexToUpdate = null;
-        const range = `${SHEET_NAME_DRAFTS}!A:A`; // Lee IDs
-        const existingRows = await sheets.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: range,
-        });
+        await query(cignaQuery, cignaValues);
+      }
 
-        const rows = existingRows.data.values || [];
-        for (let i = 1; i < rows.length; i++) {
-            if (rows[i][0] === data.draftId) {
-                rowIndexToUpdate = i + 1; // Fila de Sheets (base 1)
-                break;
-            }
-        }
-        
-        // 3. Determinar el método de escritura (UPDATE o APPEND)
-        let sheetAction = 'UPDATE';
-        if (!rowIndexToUpdate) {
-            // Si no se encuentra, usamos APPEND para agregar uno nuevo
-            sheetAction = 'APPEND';
-            rowIndexToUpdate = `${SHEET_NAME_DRAFTS}!A1`; // Rango para APPEND
-        } else {
-            // Si se encuentra, usamos UPDATE en la fila específica
-            rowIndexToUpdate = `${SHEET_NAME_DRAFTS}!A${rowIndexToUpdate}`;
-        }
-        
-        // 4. Ejecutar la acción
-        if (sheetAction === 'APPEND') {
-             await sheets.spreadsheets.values.append({
-                spreadsheetId: SPREADSHEET_ID,
-                range: rowIndexToUpdate,
-                valueInputOption: 'USER_ENTERED',
-                insertDataOption: 'INSERT_ROWS',
-                resource: { values: [borradorData] },
-            });
-        } else {
-             await sheets.spreadsheets.values.update({
-                spreadsheetId: SPREADSHEET_ID,
-                range: rowIndexToUpdate,
-                valueInputOption: 'USER_ENTERED',
-                resource: { values: [borradorData] },
-            });
-        }
-
-        res.status(200).json({ message: 'Borrador guardado/actualizado exitosamente por Service Account.' });
-
-    } catch (error) {
-        console.error('❌ Error al guardar borrador con SA:', error.message);
-        res.status(500).json({ error: 'Error al guardar borrador en Sheets. Verifica permisos y nombre de hoja.' });
+      console.log(`✅ ${data.cignaPlans.length} plan(es) Cigna guardado(s)`);
     }
+
+    return res.status(201).json({
+      success: true,
+      clientId: clientId,
+      folderName: folderName,
+      message: 'Formulario procesado exitosamente',
+      stats: {
+        dependientes: data.dependents?.length || 0,
+        cignaPlans: data.cignaPlans?.length || 0,
+        metodoPago: data.metodoPago || 'ninguno'
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error en /api/submit-form-data:', error.message);
+    console.error('Stack:', error.stack);
+    
+    return res.status(500).json({
+      error: error.message || 'Error interno del servidor',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
 });
 
+// ==================== MANEJO DE ERRORES 404 ====================
+app.use((req, res) => {
+  res.status(404).json({ 
+    error: 'Ruta no encontrada',
+    path: req.path,
+    method: req.method
+  });
+});
 
-// === 9. INICIO DEL SERVIDOR ===
-const PORT = process.env.PORT || 3001;
+// ==================== MANEJO DE ERRORES GLOBAL ====================
+app.use((error, req, res, next) => {
+  console.error('❌ Error no capturado:', error);
+  res.status(500).json({ 
+    error: 'Error interno del servidor',
+    message: error.message
+  });
+});
+
+// ==================== INICIAR SERVIDOR ====================
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`
+╔════════════════════════════════════════╗
+║   🚀 Servidor Backend Iniciado         ║
+║   📍 Puerto: ${PORT}                    ║
+║   🌍 Entorno: ${process.env.NODE_ENV || 'development'}     ║
+║   ⏰ Fecha: ${new Date().toLocaleString('es-ES')} ║
+╚════════════════════════════════════════╝
+  `);
 });
+
+export default app;
