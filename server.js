@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import bcrypt from 'bcrypt';
+import { google } from 'googleapis';
 import { query } from './db.js';
 import draftRoutes from './routes/draftRoutes.js';
 import dotenv from 'dotenv';
@@ -9,6 +10,73 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// ==================== CONFIGURACIÓN GOOGLE SHEETS ====================
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID || "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
+const SHEET_NAME_OBAMACARE = "Pólizas";
+const SHEET_NAME_CIGNA = "Cigna Complementario";
+const SHEET_NAME_PAGOS = "Pagos";
+
+// Configurar autenticación con Service Account
+let sheetsClient = null;
+
+async function initGoogleSheets() {
+  try {
+    const credentials = process.env.GOOGLE_SERVICE_ACCOUNT_KEY 
+      ? JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY)
+      : null;
+
+    if (!credentials) {
+      console.warn('⚠️ No se encontraron credenciales de Google. Sheets deshabilitado.');
+      return null;
+    }
+
+    const auth = new google.auth.GoogleAuth({
+      credentials: credentials,
+      scopes: [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive.file'
+      ],
+    });
+
+    const authClient = await auth.getClient();
+    sheetsClient = google.sheets({ version: 'v4', auth: authClient });
+    
+    console.log('✅ Google Sheets API inicializada correctamente');
+    return sheetsClient;
+  } catch (error) {
+    console.error('❌ Error inicializando Google Sheets:', error.message);
+    return null;
+  }
+}
+
+// Inicializar al arrancar
+initGoogleSheets();
+
+// Función para agregar datos a Google Sheets
+async function appendToSheet(sheetName, values) {
+  if (!sheetsClient) {
+    console.warn('⚠️ Google Sheets no disponible. Saltando...');
+    return null;
+  }
+
+  try {
+    const response = await sheetsClient.spreadsheets.values.append({
+      spreadsheetId: SPREADSHEET_ID,
+      range: `${sheetName}!A:Z`,
+      valueInputOption: 'USER_ENTERED',
+      requestBody: {
+        values: [values]
+      }
+    });
+
+    console.log(`✅ Datos agregados a ${sheetName}:`, response.data.updates);
+    return response.data;
+  } catch (error) {
+    console.error(`❌ Error agregando a ${sheetName}:`, error.message);
+    throw error;
+  }
+}
 
 // Middlewares
 app.use(cors({
@@ -30,7 +98,11 @@ app.get('/', (req, res) => {
   res.json({ 
     status: 'ok', 
     message: 'Backend de Asesorías S&S funcionando correctamente',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    services: {
+      postgresql: true,
+      googleSheets: sheetsClient !== null
+    }
   });
 });
 
@@ -50,7 +122,6 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    // Consultar usuario en la base de datos
     const userQuery = `
       SELECT id, nombre, email, password, rol 
       FROM usuarios 
@@ -68,16 +139,12 @@ app.post('/api/login', async (req, res) => {
 
     const user = users[0];
 
-    // Verificar si la contraseña almacenada es un hash de bcrypt
     const isHashedPassword = user.password && user.password.startsWith('$2');
-
     let passwordValid = false;
 
     if (isHashedPassword) {
-      // Comparar con bcrypt si es un hash
       passwordValid = await bcrypt.compare(password, user.password);
     } else {
-      // Comparación directa para contraseñas no hasheadas (temporal)
       passwordValid = user.password === password;
     }
 
@@ -90,7 +157,6 @@ app.post('/api/login', async (req, res) => {
 
     console.log(`✅ Login exitoso: ${user.nombre} (${user.rol})`);
 
-    // Generar token simple (en producción usa JWT)
     const token = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
 
     return res.json({
@@ -120,7 +186,6 @@ app.post('/api/submit-form-data', async (req, res) => {
     console.log('📥 Recibiendo datos del formulario...');
     const data = req.body;
 
-    // Validación básica
     if (!data.nombre || !data.apellidos) {
       return res.status(400).json({ 
         error: 'Los campos "nombre" y "apellidos" son obligatorios' 
@@ -130,7 +195,7 @@ app.post('/api/submit-form-data', async (req, res) => {
     const folderName = `${data.nombre} ${data.apellidos}`;
     console.log(`📋 Procesando cliente: ${folderName}`);
 
-    // 1. Insertar datos principales en pólizas (Obamacare)
+    // ========== 1. GUARDAR EN POSTGRESQL ==========
     const obamacareQuery = `
       INSERT INTO polizas (
         fecha_registro, nombre, apellidos, sexo, correo, telefono, telefono2,
@@ -189,12 +254,58 @@ app.post('/api/submit-form-data', async (req, res) => {
       throw new Error('No se pudo obtener el ID del cliente insertado');
     }
 
-    console.log(`✅ Cliente guardado con ID: ${clientId}`);
+    console.log(`✅ Cliente guardado en PostgreSQL con ID: ${clientId}`);
 
-    // 2. Insertar datos de pago si existen
+    // ========== 2. GUARDAR EN GOOGLE SHEETS ==========
+    if (sheetsClient) {
+      try {
+        // Preparar fila para Obamacare
+        const obamacareRow = [
+          data.fechaRegistro || '',
+          data.nombre || '',
+          data.apellidos || '',
+          data.sexo || '',
+          data.correo || '',
+          data.telefono || '',
+          data.telefono2 || '',
+          data.fechaNacimiento || '',
+          data.estadoMigratorio || '',
+          data.ssn || '',
+          data.ingresos || '',
+          data.ocupacion || '',
+          data.nacionalidad || '',
+          data.aplica || '',
+          data.cantidadDependientes || '0',
+          data.direccion || '',
+          data.casaApartamento || '',
+          data.condado || '',
+          data.ciudad || '',
+          data.estado || '',
+          data.codigoPostal || '',
+          data.poBox || '',
+          data.compania || '',
+          data.plan || '',
+          data.creditoFiscal || '',
+          data.prima || '',
+          data.link || '',
+          data.tipoVenta || '',
+          data.operador || '',
+          data.claveSeguridad || '',
+          data.observaciones || ''
+        ];
+
+        await appendToSheet(SHEET_NAME_OBAMACARE, obamacareRow);
+        console.log('✅ Datos guardados en Google Sheets (Obamacare)');
+      } catch (sheetsError) {
+        console.error('⚠️ Error guardando en Sheets (continuando):', sheetsError.message);
+      }
+    }
+
+    // ========== 3. GUARDAR PAGOS ==========
     if (data.metodoPago) {
       console.log(`💳 Guardando método de pago: ${data.metodoPago}`);
       
+      // PostgreSQL
       const pagoQuery = `
         INSERT INTO pagos (
           client_id, metodo_pago, num_cuenta, num_ruta, nombre_banco,
@@ -219,10 +330,37 @@ app.post('/api/submit-form-data', async (req, res) => {
       ];
 
       await query(pagoQuery, pagoValues);
-      console.log('✅ Datos de pago guardados');
+      console.log('✅ Datos de pago guardados en PostgreSQL');
+
+      // Google Sheets
+      if (sheetsClient) {
+        try {
+          const pagoRow = [
+            clientId,
+            data.nombre || '',
+            data.apellidos || '',
+            data.metodoPago || '',
+            data.pagoBanco?.numCuenta || '',
+            data.pagoBanco?.numRuta || '',
+            data.pagoBanco?.nombreBanco || '',
+            data.pagoBanco?.titularCuenta || '',
+            data.pagoBanco?.socialCuenta || '',
+            data.pagoTarjeta?.numTarjeta || '',
+            data.pagoTarjeta?.fechaVencimiento || '',
+            data.pagoTarjeta?.cvc || '',
+            data.pagoTarjeta?.titularTarjeta || '',
+            data.pagoObservacionTarjeta || ''
+          ];
+
+          await appendToSheet(SHEET_NAME_PAGOS, pagoRow);
+          console.log('✅ Datos de pago guardados en Google Sheets');
+        } catch (sheetsError) {
+          console.error('⚠️ Error guardando pagos en Sheets:', sheetsError.message);
+        }
+      }
     }
 
-    // 3. Insertar planes Cigna si existen
+    // ========== 4. GUARDAR PLANES CIGNA ==========
     if (data.cignaPlans && Array.isArray(data.cignaPlans) && data.cignaPlans.length > 0) {
       console.log(`🏥 Guardando ${data.cignaPlans.length} plan(es) Cigna`);
       
@@ -236,6 +374,7 @@ app.post('/api/submit-form-data', async (req, res) => {
       `;
 
       for (const plan of data.cignaPlans) {
+        // PostgreSQL
         const cignaValues = [
           clientId,
           plan.tipo || null,
@@ -252,6 +391,32 @@ app.post('/api/submit-form-data', async (req, res) => {
         ];
 
         await query(cignaQuery, cignaValues);
+
+        // Google Sheets
+        if (sheetsClient) {
+          try {
+            const cignaRow = [
+              clientId,
+              data.nombre || '',
+              data.apellidos || '',
+              plan.tipo || '',
+              plan.coberturaTipo || '',
+              plan.beneficio || '',
+              plan.deducible || '',
+              plan.prima || '',
+              plan.comentarios || '',
+              plan.beneficioDiario || '',
+              plan.beneficiarioNombre || '',
+              plan.beneficiarioFechaNacimiento || '',
+              plan.beneficiarioDireccion || '',
+              plan.beneficiarioRelacion || ''
+            ];
+
+            await appendToSheet(SHEET_NAME_CIGNA, cignaRow);
+          } catch (sheetsError) {
+            console.error('⚠️ Error guardando plan Cigna en Sheets:', sheetsError.message);
+          }
+        }
       }
 
       console.log(`✅ ${data.cignaPlans.length} plan(es) Cigna guardado(s)`);
@@ -265,7 +430,11 @@ app.post('/api/submit-form-data', async (req, res) => {
       stats: {
         dependientes: data.dependents?.length || 0,
         cignaPlans: data.cignaPlans?.length || 0,
-        metodoPago: data.metodoPago || 'ninguno'
+        metodoPago: data.metodoPago || 'ninguno',
+        savedTo: {
+          postgresql: true,
+          googleSheets: sheetsClient !== null
+        }
       }
     });
 
@@ -305,7 +474,9 @@ app.listen(PORT, () => {
 ║   🚀 Servidor Backend Iniciado         ║
 ║   📍 Puerto: ${PORT}                    ║
 ║   🌍 Entorno: ${process.env.NODE_ENV || 'development'}     ║
-║   ⏰ Fecha: ${new Date().toLocaleString('es-ES')} ║
+║   📊 PostgreSQL: ✅                     ║
+║   📈 Google Sheets: ${sheetsClient ? '✅' : '❌'}            ║
+║   ⏰ ${new Date().toLocaleString('es-ES')} ║
 ╚════════════════════════════════════════╝
   `);
 });
