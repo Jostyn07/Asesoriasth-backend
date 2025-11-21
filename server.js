@@ -11,7 +11,7 @@ import bcrypt from 'bcrypt';
 import { query } from './db.js';
 
 // === 2. CONSTANTES ===
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID; // Desde variable de entorno
 const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
@@ -21,8 +21,25 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 // === 3. HELPERS ===
 
 async function getAuthenticatedClient() {
-    const credentials = JSON.parse(process.env.GOOGLE_SA_CREDENTIALS);
-    const authClient = new google.auth.GoogleAuth ({
+    // Intentar obtener credenciales de diferentes variables de entorno
+    const credentialsRaw = process.env.GOOGLE_CREDENTIALS || 
+                           process.env.GOOGLE_APPLICATION_CREDENTIALS || 
+                           process.env.GOOGLE_SA_CREDENTIALS;
+    
+    if (!credentialsRaw) {
+        throw new Error('No se encontraron credenciales de Google. Configura GOOGLE_CREDENTIALS en Render.');
+    }
+    
+    let credentials;
+    try {
+        credentials = JSON.parse(credentialsRaw);
+    } catch (parseError) {
+        console.error('❌ Error parseando credenciales JSON:', parseError.message);
+        console.error('Primeros 50 caracteres:', credentialsRaw.substring(0, 50));
+        throw new Error(`Credenciales JSON inválidas: ${parseError.message}`);
+    }
+    
+    const authClient = new google.auth.GoogleAuth({
         credentials,
         scopes: [
             'https://www.googleapis.com/auth/drive',
@@ -191,6 +208,8 @@ app.post('/api/create-folder', async (req, res) => {
 app.post('/api/save-draft', async (req, res) => {
     try {
         const data = req.body;
+        console.log('📝 Guardando NUEVO borrador en Google Sheets (Multi-Usuario)...');
+
         const authClient = await getAuthenticatedClient();
         const sheets = google.sheets({ version: 'v4', auth: authClient });
 
@@ -586,42 +605,9 @@ app.post('/api/submit-form-data', async (req, res) => {
             console.log("Datos de pago guardados exitosamente")
         }
 
-        // Intentar eliminar el borrador si existe
-        if (data.draftId) {
-            try {
-                const response = await sheets.spreadsheets.values.get({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: `${SHEET_NAME_DRAFTS}!A:AD`,
-                });
-
-                const rows = response.data.values || [];
-                const SHEET_ID_BORRADOR = 0; // ⚠️ CAMBIAR por el ID real
-                
-                for (let i = 1; i < rows.length; i++) {
-                    if (rows[i][26] === data.draftId) {
-                        await sheets.spreadsheets.batchUpdate({
-                            spreadsheetId: SPREADSHEET_ID,
-                            resource: {
-                                requests: [{
-                                    deleteDimension: {
-                                        range: {
-                                            sheetId: SHEET_ID_BORRADOR,
-                                            dimension: 'ROWS',
-                                            startIndex: i,
-                                            endIndex: i + 1
-                                        }
-                                    }
-                                }]
-                            }
-                        });
-                        console.log(`✅ Borrador ${data.draftId} eliminado`);
-                        break;
-                    }
-                }
-            } catch (draftError) {
-                console.error('⚠️ Error al eliminar borrador:', draftError);
-            }
-        }
+        // ❌ ELIMINADO: Ya no borramos el borrador al enviar
+        // El usuario quiere mantener los borradores en Sheets
+        console.log('ℹ️ Borrador NO eliminado (comportamiento configurado)');
 
         res.status(200).json({
             message: 'Datos del formulario enviados exitosamente',
