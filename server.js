@@ -21,7 +21,7 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 // === 3. HELPERS ===
 
 async function getAuthenticatedClient() {
-    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
+    const credentials = JSON.parse(process.env.GOOGLE_SA_CREDENTIALS);
     const authClient = new google.auth.GoogleAuth ({
         credentials,
         scopes: [
