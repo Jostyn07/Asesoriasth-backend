@@ -11,7 +11,7 @@ import bcrypt from 'bcrypt';
 import { query } from './db.js';
 
 // === 2. CONSTANTES ===
-const SPREADSHEET_ID = "1T8YifEIUU7a6ugf_Xn5_1edUUMoYfM9loDuOQU1u2-8";
+const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const SHEET_NAME_OBAMACARE = "Pólizas";
 const SHEET_NAME_CIGNA = "Cigna Complementario";
 const SHEET_NAME_PAGOS = "Pagos";
@@ -21,7 +21,7 @@ const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_FOLDER_ID;
 // === 3. HELPERS ===
 
 async function getAuthenticatedClient() {
-    const credentials = JSON.parse(process.env.GOOGLE_SA_CREDENTIALS);
+    const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS);
     const authClient = new google.auth.GoogleAuth ({
         credentials,
         scopes: [
